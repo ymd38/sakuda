@@ -1,0 +1,101 @@
+import { resolve } from 'node:path'
+import { z } from 'zod'
+
+export class EnvError extends Error {}
+
+function isBase64Key32(s: string): boolean {
+  const buf = Buffer.from(s, 'base64')
+  return buf.length === 32 && buf.toString('base64') === s
+}
+
+const optionalString = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().optional(),
+)
+
+const EnvSchema = z.object({
+  SAKUDA_ENCRYPTION_KEY: z
+    .string({
+      error: 'SAKUDA_ENCRYPTION_KEY is required (base64 of 32 random bytes; run `pnpm keygen`)',
+    })
+    .refine(isBase64Key32, 'SAKUDA_ENCRYPTION_KEY must be canonical base64 of exactly 32 bytes'),
+  SAKUDA_DATA_DIR: z.string().default('./data'),
+  SAKUDA_MIGRATIONS_DIR: z.string().default('./server/db/migrations'),
+  SAKUDA_NUCLEI_BIN: z.string().default('nuclei'),
+  SAKUDA_NUCLEI_TEMPLATES: z.string().default('/opt/nuclei-templates/http'),
+  SAKUDA_NUCLEI_MAX_MINUTES: z.coerce.number().int().positive().default(60),
+  SAKUDA_ZAP_CMD: z.string().default('zap.sh'),
+  SAKUDA_ZAP_WORKDIR: optionalString,
+  SAKUDA_ZAP_MAX_HEAP: z
+    .string()
+    .regex(/^\d+[kKmMgG]?$/)
+    .default('1024m'),
+  SAKUDA_LOCALHOST_ALIAS: optionalString,
+  SAKUDA_ZAP_LOCALHOST_ALIAS: optionalString,
+  SAKUDA_ENGINE_GRACE_MINUTES: z.coerce.number().int().nonnegative().default(10),
+  SAKUDA_JOB_RUNNER: z.enum(['on', 'off']).default('on'),
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+})
+
+export interface Env {
+  encryptionKey: string
+  dataDir: string
+  dbFile: string
+  scansDir: string
+  migrationsDir: string
+  localhostAlias: string | undefined
+  nuclei: { bin: string; templatesDir: string; maxMinutes: number }
+  zap: {
+    cmd: string
+    workDir: string | undefined
+    maxHeap: string
+    localhostAlias: string | undefined
+  }
+  engineGraceMinutes: number
+  jobRunner: boolean
+  logLevel: 'debug' | 'info' | 'warn' | 'error'
+}
+
+export function parseEnv(raw: NodeJS.ProcessEnv): Env {
+  const r = EnvSchema.safeParse(raw)
+  if (!r.success)
+    throw new EnvError(
+      'invalid environment: ' +
+        r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+    )
+  const v = r.data
+  const dataDir = resolve(v.SAKUDA_DATA_DIR)
+  return {
+    encryptionKey: v.SAKUDA_ENCRYPTION_KEY,
+    dataDir,
+    dbFile: resolve(dataDir, 'sakuda.db'),
+    scansDir: resolve(dataDir, 'scans'),
+    migrationsDir: resolve(v.SAKUDA_MIGRATIONS_DIR),
+    localhostAlias: v.SAKUDA_LOCALHOST_ALIAS,
+    nuclei: {
+      bin: v.SAKUDA_NUCLEI_BIN,
+      templatesDir: v.SAKUDA_NUCLEI_TEMPLATES,
+      maxMinutes: v.SAKUDA_NUCLEI_MAX_MINUTES,
+    },
+    zap: {
+      cmd: v.SAKUDA_ZAP_CMD,
+      workDir: v.SAKUDA_ZAP_WORKDIR,
+      maxHeap: v.SAKUDA_ZAP_MAX_HEAP,
+      localhostAlias: v.SAKUDA_ZAP_LOCALHOST_ALIAS ?? v.SAKUDA_LOCALHOST_ALIAS,
+    },
+    engineGraceMinutes: v.SAKUDA_ENGINE_GRACE_MINUTES,
+    jobRunner: v.SAKUDA_JOB_RUNNER === 'on',
+    logLevel: v.LOG_LEVEL,
+  }
+}
+
+let cached: Env | undefined
+
+export function getEnv(): Env {
+  cached ??= parseEnv(process.env)
+  return cached
+}
+
+export function resetEnvCache(): void {
+  cached = undefined
+}
