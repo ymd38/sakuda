@@ -1,0 +1,59 @@
+/* Design tokens — source of truth: /DESIGN.md (Nike light system). Change values only here. */
+@theme {
+  --color-*: initial;
+  --color-canvas: #ffffff;
+  --color-soft-cloud: #f5f5f5;
+  --color-ink: #111111;
+  --color-on-primary: #ffffff;
+  --color-charcoal: #39393b;
+  --color-ash: #4b4b4d;
+  --color-mute: #707072;
+  --color-stone: #9e9ea0;
+  --color-hairline: #cacacb;
+  --color-hairline-soft: #e5e5e5;
+  --color-sale: #d30005;
+  --color-sale-deep: #780700;
+  --color-success: #007d48;
+  --color-success-bright: #1eaa52;
+  --color-info: #1151ff;
+  --color-info-deep: #0034e3;
+  --color-accent-teal: #0a7281;
+  --color-accent-pink: #ed1aa0;
+  --radius-*: initial;
+  --radius-none: 0px;
+  --radius-sm: 18px;
+  --radius-md: 24px;
+  --radius-lg: 30px;
+  --radius-full: 9999px;
+  --spacing-xxs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 18px;
+  --spacing-xl: 24px;
+  --spacing-xxl: 30px;
+  --spacing-section: 48px;
+  --text-display: 96px;
+  --text-display--line-height: 0.9;
+  --text-heading-xl: 32px;
+  --text-heading-xl--line-height: 1.2;
+  --text-heading-lg: 24px;
+  --text-heading-lg--line-height: 1.2;
+  --text-heading-md: 16px;
+  --text-heading-md--line-height: 1.75;
+  --text-body-md: 16px;
+  --text-body-md--line-height: 1.5;
+  --text-button-md: 16px;
+  --text-button-md--line-height: 1.5;
+  --text-button-sm: 14px;
+  --text-button-sm--line-height: 1.5;
+  --text-caption-md: 14px;
+  --text-caption-md--line-height: 1.5;
+  --text-caption-sm: 12px;
+  --text-caption-sm--line-height: 1.5;
+  --text-utility-xs: 9px;
+  --text-utility-xs--line-height: 1.75;
+  --font-display: 'Bebas Neue', 'Inter', sans-serif; /* substitute for Nike Futura ND */
+  --font-body: 'Inter', system-ui, sans-serif; /* substitute for Helvetica Now */
+  --container-page: 1440px;
+}

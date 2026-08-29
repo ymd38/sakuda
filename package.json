@@ -1,0 +1,58 @@
+{
+  "name": "sakuda",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "start": "node .output/server/index.mjs",
+    "postinstall": "nuxt prepare",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "nuxt typecheck",
+    "test": "vitest run --project server --project nuxt",
+    "test:watch": "vitest --project server --project nuxt",
+    "test:e2e": "vitest run --project e2e",
+    "db:generate": "drizzle-kit generate",
+    "keygen": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64'))\""
+  },
+  "dependencies": {
+    "@fontsource/bebas-neue": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "better-sqlite3": "^13.0.3",
+    "chart.js": "^4.5.1",
+    "drizzle-orm": "^0.45.2",
+    "nuxt": "^4.5.2",
+    "pino": "^10.3.1",
+    "vue": "^3.5.42",
+    "vue-router": "^5.3.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.5.2"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "^1.15.2",
+    "@nuxt/test-utils": "^4.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@vue/test-utils": "^2.5.0",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.5",
+    "happy-dom": "^20.12.0",
+    "prettier": "^3.9.6",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11",
+    "vue-tsc": "^3.3.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "unrs-resolver"
+    ]
+  }
+}
