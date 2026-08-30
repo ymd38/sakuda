@@ -49,12 +49,13 @@ export function createHeaderCipher(keyBase64: string): HeaderCipher {
       let plain: string
       try {
         plain = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8')
+        const parsed = HeadersSchema.safeParse(JSON.parse(plain))
+        if (!parsed.success) throw new DecryptError('decrypted headers failed validation')
+        return parsed.data
       } catch (cause) {
+        if (cause instanceof DecryptError) throw cause
         throw new DecryptError('decryption failed (key/AAD mismatch or tampering)', { cause })
       }
-      const parsed = HeadersSchema.safeParse(JSON.parse(plain))
-      if (!parsed.success) throw new DecryptError('decrypted headers failed validation')
-      return parsed.data
     },
   }
 }

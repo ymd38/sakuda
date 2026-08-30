@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createCipheriv } from 'node:crypto'
 import {
   DecryptError,
   InvalidKeyError,
@@ -58,6 +58,24 @@ describe('createHeaderCipher', () => {
     expect(() => c.seal([{ name: 'X', value: 'a\r\nb' }], 's')).toThrow()
     expect(() => c.seal([{ name: 'X:Y', value: 'a' }], 's')).toThrow()
     expect(() => c.seal([], 's')).toThrow(/no headers/)
+  })
+
+  it('fails to open envelope with non-JSON plaintext', () => {
+    const keyBuf = Buffer.from(key, 'base64')
+    const siteId = 'test-site'
+    const version = 1
+    const nonce = randomBytes(12)
+    const nonJsonPlaintext = 'not valid json'
+    const aadBuf = Buffer.concat([Buffer.from([version]), Buffer.from(siteId, 'utf8')])
+
+    const cipher = createCipheriv('aes-256-gcm', keyBuf, nonce)
+    cipher.setAAD(aadBuf)
+    const ct = Buffer.concat([cipher.update(nonJsonPlaintext, 'utf8'), cipher.final()])
+    const tag = cipher.getAuthTag()
+    const envelope = Buffer.concat([Buffer.from([version]), nonce, ct, tag])
+
+    const c = createHeaderCipher(key)
+    expect(() => c.open(envelope, siteId)).toThrow(DecryptError)
   })
 
   it('headersToNucleiArgs formats -H pairs', () => {
