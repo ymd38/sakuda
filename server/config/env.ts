@@ -1,7 +1,26 @@
-import { resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import { z } from 'zod'
 
-export class EnvError extends Error {}
+export class EnvError extends Error {
+  constructor(...args: ConstructorParameters<typeof Error>) {
+    super(...args)
+    this.name = 'EnvError'
+  }
+}
+
+/**
+ * `runCommand`/`runZap` spawn with `cwd: <per-scan workDir>`, so Node
+ * resolves a relative command containing a path separator (e.g.
+ * `./scripts/zap-docker.sh`) against *that* directory, not the process's
+ * cwd — it can never be found. Resolve such values against
+ * `process.cwd()` at parse time instead. A bare name with no separator
+ * (e.g. `zap.sh`, `nuclei`) is left untouched for a `PATH` lookup, and an
+ * already-absolute path is left untouched too.
+ */
+function resolveExecutablePath(value: string): string {
+  if (!value.includes('/')) return value
+  return isAbsolute(value) ? value : resolve(process.cwd(), value)
+}
 
 function isBase64Key32(s: string): boolean {
   const buf = Buffer.from(s, 'base64')
@@ -73,12 +92,12 @@ export function parseEnv(raw: NodeJS.ProcessEnv): Env {
     migrationsDir: resolve(v.SAKUDA_MIGRATIONS_DIR),
     localhostAlias: v.SAKUDA_LOCALHOST_ALIAS,
     nuclei: {
-      bin: v.SAKUDA_NUCLEI_BIN,
+      bin: resolveExecutablePath(v.SAKUDA_NUCLEI_BIN),
       templatesDir: v.SAKUDA_NUCLEI_TEMPLATES,
       maxMinutes: v.SAKUDA_NUCLEI_MAX_MINUTES,
     },
     zap: {
-      cmd: v.SAKUDA_ZAP_CMD,
+      cmd: resolveExecutablePath(v.SAKUDA_ZAP_CMD),
       workDir: v.SAKUDA_ZAP_WORKDIR,
       maxHeap: v.SAKUDA_ZAP_MAX_HEAP,
       localhostAlias: v.SAKUDA_ZAP_LOCALHOST_ALIAS ?? v.SAKUDA_LOCALHOST_ALIAS,

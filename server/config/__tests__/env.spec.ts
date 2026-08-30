@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { randomBytes } from 'node:crypto'
+import { resolve } from 'node:path'
 import { EnvError, parseEnv } from '../env'
 const key = randomBytes(32).toString('base64')
 describe('parseEnv', () => {
@@ -33,5 +34,37 @@ describe('parseEnv', () => {
     expect(() =>
       parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_NUCLEI_MAX_MINUTES: 'ten' }),
     ).toThrow(EnvError)
+  })
+
+  describe('resolving relative executable paths (C2)', () => {
+    it('leaves a bare name (PATH lookup) untouched', () => {
+      const env = parseEnv({
+        SAKUDA_ENCRYPTION_KEY: key,
+        SAKUDA_ZAP_CMD: 'zap.sh',
+        SAKUDA_NUCLEI_BIN: 'nuclei',
+      })
+      expect(env.zap.cmd).toBe('zap.sh')
+      expect(env.nuclei.bin).toBe('nuclei')
+    })
+
+    it('resolves a relative path containing a separator against process.cwd()', () => {
+      const env = parseEnv({
+        SAKUDA_ENCRYPTION_KEY: key,
+        SAKUDA_ZAP_CMD: './scripts/zap-docker.sh',
+        SAKUDA_NUCLEI_BIN: './bin/nuclei',
+      })
+      expect(env.zap.cmd).toBe(resolve(process.cwd(), './scripts/zap-docker.sh'))
+      expect(env.nuclei.bin).toBe(resolve(process.cwd(), './bin/nuclei'))
+    })
+
+    it('leaves an already-absolute path untouched', () => {
+      const env = parseEnv({
+        SAKUDA_ENCRYPTION_KEY: key,
+        SAKUDA_ZAP_CMD: '/zap/zap.sh',
+        SAKUDA_NUCLEI_BIN: '/usr/local/bin/nuclei',
+      })
+      expect(env.zap.cmd).toBe('/zap/zap.sh')
+      expect(env.nuclei.bin).toBe('/usr/local/bin/nuclei')
+    })
   })
 })
