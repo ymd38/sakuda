@@ -13,7 +13,17 @@ export function expandNucleiTargets(site: NucleiTargetSite): {
   urls: string[]
   excluded: string[]
 } {
-  const { lines } = parseNucleiPathLines(site.nucleiPaths)
+  const parsed = parseNucleiPathLines(site.nucleiPaths)
+  // No paths configured → scan the base URL(s) themselves. Nuclei is
+  // signature-based and does not crawl, so the roots are the minimum useful
+  // target set (exposure / misconfig / tech templates work on them).
+  const lines =
+    parsed.lines.length > 0
+      ? parsed.lines
+      : [
+          { lineNo: 0, base: 'front' as const, path: '/' },
+          ...(site.apiBaseUrl ? [{ lineNo: 0, base: 'api' as const, path: '/' }] : []),
+        ]
   const patterns = parseExcludePatterns(site.excludePaths)
   const urls: string[] = []
   const excluded: string[] = []

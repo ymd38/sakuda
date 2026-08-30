@@ -185,7 +185,8 @@ describe('runNuclei', () => {
       runNuclei({
         scanId: 'scan-3',
         engine: 'nuclei',
-        site: baseSite({ nucleiPaths: '' }),
+        // every configured path excluded → nothing left to scan
+        site: baseSite({ nucleiPaths: '/only', excludePaths: '/only' }),
         workDir,
         env,
         logger,

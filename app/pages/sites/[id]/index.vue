@@ -22,8 +22,10 @@ const zapFeChecked = ref(true)
 const submitting = ref(false)
 const errorMessage = ref<string | null>(null)
 
-const nucleiAvailable = computed(
-  () => !!site.value && parseNucleiPathLines(site.value.nucleiPaths).lines.length > 0,
+// nuclei always runs: with no paths configured it scans the base URL(s).
+const nucleiAvailable = computed(() => !!site.value)
+const nucleiScansRootOnly = computed(
+  () => !!site.value && parseNucleiPathLines(site.value.nucleiPaths).lines.length === 0,
 )
 const zapApiAvailable = computed(
   () => !!site.value && (!!site.value.openapiUrl || !!site.value.openapiJson),
@@ -96,8 +98,9 @@ async function handleStartScan() {
               />
               {{ ENGINE_LABELS.nuclei }}
             </label>
-            <p v-if="!nucleiAvailable" class="text-caption-sm text-mute mt-1">
-              Add nuclei paths in Edit to enable this engine.
+            <p v-if="nucleiScansRootOnly" class="text-caption-sm text-mute mt-1">
+              No nuclei paths configured — scans the base URL only. Add paths in Edit to cover more
+              pages/endpoints.
             </p>
           </div>
 

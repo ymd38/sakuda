@@ -6,7 +6,6 @@ import { orderEngines } from '../engines'
 import { ServiceError } from './errors'
 import type { Engine, ScanSummary, SeverityCounts } from '#shared/types/api'
 import { addCounts, emptyCounts } from '#shared/utils/severity'
-import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
 
 const RESTART_ERROR = 'server restarted while the scan was running'
 const ACTIVE_STATUSES = ['queued', 'running'] as const
@@ -55,15 +54,9 @@ export function listScans(db: Db, siteId: string): ScanSummary[] {
     .map((row) => toScanSummary(row, countsForScan(db, row.id)))
 }
 
-function assertEnginePrereqs(engines: Engine[], nucleiPaths: string, hasOpenapi: boolean): void {
+function assertEnginePrereqs(engines: Engine[], _nucleiPaths: string, hasOpenapi: boolean): void {
   for (const engine of engines) {
-    if (engine === 'nuclei' && parseNucleiPathLines(nucleiPaths).lines.length === 0) {
-      throw new ServiceError(
-        422,
-        'ENGINE_PREREQ',
-        'nuclei requires at least one usable path in nucleiPaths',
-      )
-    }
+    // nuclei has no prerequisite: with no paths configured it scans the base URL(s).
     if (engine === 'zap-api' && !hasOpenapi) {
       throw new ServiceError(422, 'ENGINE_PREREQ', 'zap-api requires openapiUrl or openapiJson')
     }

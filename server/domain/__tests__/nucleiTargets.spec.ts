@@ -9,6 +9,16 @@ const site: NucleiTargetSite = {
 }
 
 describe('expandNucleiTargets', () => {
+  it('defaults to the base URL roots when no paths are configured', () => {
+    expect(expandNucleiTargets({ ...site, nucleiPaths: '' }).urls).toEqual([
+      'http://localhost:3000/',
+      'http://localhost:8080/',
+    ])
+    expect(
+      expandNucleiTargets({ ...site, nucleiPaths: '# only a comment', apiBaseUrl: null }).urls,
+    ).toEqual(['http://localhost:3000/'])
+  })
+
   it('resolves front and api lines to the right bases, skipping comments', () => {
     const { urls, excluded } = expandNucleiTargets(site)
     expect(urls).toEqual([

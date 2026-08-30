@@ -146,9 +146,10 @@ describe('createScan', () => {
     )
   })
 
-  it('422 ENGINE_PREREQ for nuclei with empty nucleiPaths', () => {
+  it('nuclei has no prerequisite (empty nucleiPaths falls back to the base URL)', () => {
     const site = createSite(siteDeps, { ...base, nucleiPaths: '' })
-    expectServiceError(() => createScan(db, { now, id }, site.id, ['nuclei']), 422, 'ENGINE_PREREQ')
+    const scan = createScan(db, { now, id }, site.id, ['nuclei'])
+    expect(scan.engines).toEqual(['nuclei'])
   })
 
   it('zap-fe has no prerequisite', () => {
@@ -168,9 +169,13 @@ describe('createScan', () => {
   })
 
   it('422 ENGINE_PREREQ takes priority over an existing active scan', () => {
-    const site = createSite(siteDeps, { ...base, nucleiPaths: '' })
+    const site = createSite(siteDeps, { ...base, openapiUrl: null, openapiJson: null })
     insertActiveScan(site.id)
-    expectServiceError(() => createScan(db, { now, id }, site.id, ['nuclei']), 422, 'ENGINE_PREREQ')
+    expectServiceError(
+      () => createScan(db, { now, id }, site.id, ['zap-api']),
+      422,
+      'ENGINE_PREREQ',
+    )
   })
 })
 

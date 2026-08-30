@@ -122,8 +122,8 @@ function handleSubmit() {
       <p><span class="text-sale">*</span> = required. Everything else can stay empty.</p>
       <p>
         Which engines you can start depends on what you fill in: <strong>ZAP frontend</strong> needs
-        only the base URL + seed path · <strong>Nuclei</strong> needs at least one Nuclei path ·
-        <strong>ZAP API</strong> needs an OpenAPI URL or JSON.
+        only the base URL + seed path · <strong>Nuclei</strong> scans the base URL, plus any Nuclei
+        paths you list · <strong>ZAP API</strong> needs an OpenAPI URL or JSON.
       </p>
     </div>
 
@@ -180,7 +180,8 @@ function handleSubmit() {
 
     <div class="flex flex-col gap-2">
       <label for="site-nuclei-paths" class="text-caption-md font-medium text-ink"
-        >Nuclei paths <span class="text-mute">(required for the Nuclei engine)</span></label
+        >Nuclei paths
+        <span class="text-mute">(optional — empty scans the base URL only)</span></label
       >
       <textarea
         id="site-nuclei-paths"
