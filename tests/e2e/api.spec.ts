@@ -1,19 +1,24 @@
 import { randomBytes } from 'node:crypto'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetch, setup } from '@nuxt/test-utils/e2e'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 
 // Must be set before `setup()` boots the server subprocess: it inherits
 // process.env, and the app validates these at startup (server/config/env.ts).
 process.env.SAKUDA_ENCRYPTION_KEY = randomBytes(32).toString('base64')
-process.env.SAKUDA_DATA_DIR = await mkdtemp(join(tmpdir(), 'sakuda-e2e-'))
+const dataDir = await mkdtemp(join(tmpdir(), 'sakuda-e2e-'))
+process.env.SAKUDA_DATA_DIR = dataDir
 // Keep the queue from ever running a real scan — these tests only assert on
 // API-level state transitions (queued/409/etc.), not engine execution.
 process.env.SAKUDA_JOB_RUNNER = 'off'
 
 await setup({ server: true })
+
+afterAll(async () => {
+  await rm(dataDir, { recursive: true, force: true })
+})
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
@@ -84,6 +89,19 @@ describe('api e2e', () => {
   it('GET /api/scans/:id/report.md is rejected before the scan finishes', async () => {
     const res = await fetch(`/api/scans/${scanId}/report.md`)
     expect(res.status).toBe(409)
+  })
+
+  it('POST /api/sites with a non-JSON content-type is rejected with 415 (I7)', async () => {
+    const res = await fetch('/api/sites', {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({
+        name: 'Cross-origin form',
+        frontBaseUrl: 'http://localhost:39992',
+        nucleiPaths: '/',
+      }),
+    })
+    expect(res.status).toBe(415)
   })
 
   it('a non-local site without nonLocalConfirmed is rejected with a nonLocalConfirmed issue', async () => {

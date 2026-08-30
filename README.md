@@ -16,7 +16,7 @@ Everything — the app, nuclei + templates, and ZAP — ships in one image.
 ```bash
 docker build -t sakuda .
 
-docker run -d --name sakuda -p 3000:3000 --shm-size=1g \
+docker run -d --name sakuda -p 127.0.0.1:3000:3000 --shm-size=1g \
   --add-host=host.docker.internal:host-gateway \
   -e SAKUDA_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
   -v sakuda-data:/data \
@@ -25,6 +25,12 @@ docker run -d --name sakuda -p 3000:3000 --shm-size=1g \
 
 Open http://localhost:3000.
 
+- **Trust model: sakuda has no authentication.** Anyone who can reach the
+  port can read/create/modify sites (including their configured headers) and
+  start scans against arbitrary hosts. Bind it to loopback only (as above,
+  `-p 127.0.0.1:3000:3000`) or put it behind an authenticating reverse proxy —
+  never publish it directly (`-p 3000:3000` / `0.0.0.0`) on a shared or
+  internet-facing host.
 - **Keep the key.** `SAKUDA_ENCRYPTION_KEY` encrypts stored request headers
   (Cookie/Bearer/etc.) at rest. If you lose it, those headers become
   permanently unreadable — write it down somewhere safe (e.g. a password
@@ -90,7 +96,7 @@ pnpm dev            # http://localhost:3000
 pnpm test           # unit + component tests
 pnpm test:e2e       # API e2e tests
 pnpm run lint
-pnpm exec tsc --noEmit
+pnpm run typecheck
 ```
 
 ## Scan data on disk
@@ -100,6 +106,10 @@ pnpm exec tsc --noEmit
 contain target application data (response fragments, discovered paths) —
 treat the `data/` directory as sensitive, do not commit it or share it
 outside the team that owns the scanned target.
+
+**Retention model:** there is no per-scan expiry — a site's scan artifacts
+live on disk for as long as the site exists, and are deleted (best-effort)
+when the site itself is deleted.
 
 ## Not in this MVP
 
