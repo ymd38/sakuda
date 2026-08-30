@@ -33,5 +33,21 @@ describe('siteRequiresConfirmation', () => {
     expect(siteRequiresConfirmation('https://app.example.com', null)).toBe(true)
     expect(siteRequiresConfirmation('http://localhost:3000', 'https://api.example.com')).toBe(true)
   })
+  it('true when a local front/api pair has a non-local openapiUrl (I2)', () => {
+    expect(
+      siteRequiresConfirmation(
+        'http://localhost:3000',
+        'http://127.0.0.1:8080',
+        'https://internal.corp/openapi.json',
+      ),
+    ).toBe(true)
+  })
+  it('false when openapiUrl is local or absent', () => {
+    expect(
+      siteRequiresConfirmation('http://localhost:3000', null, 'http://localhost:3000/openapi.json'),
+    ).toBe(false)
+    expect(siteRequiresConfirmation('http://localhost:3000', null, null)).toBe(false)
+    expect(siteRequiresConfirmation('http://localhost:3000', null, undefined)).toBe(false)
+  })
   it('isLocalUrl is false for unparsable urls', () => expect(isLocalUrl('nope')).toBe(false))
 })

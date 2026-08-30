@@ -37,10 +37,6 @@ export interface NucleiStats {
   total?: string
 }
 
-const TRUNC = 4000
-const truncate = (s: string | undefined) =>
-  s === undefined ? undefined : s.length > TRUNC ? s.slice(0, TRUNC) + '…[truncated]' : s
-
 export function parseNucleiJsonl(text: string): { lines: NucleiLine[]; invalidLines: number } {
   const lines: NucleiLine[] = []
   let invalidLines = 0
@@ -109,14 +105,16 @@ export function normalizeNucleiLines(
       description: l.info.description?.trim() ?? null,
       solution: null,
       reference: refs,
+      // request/response are intentionally NOT stored here: nuclei is run with
+      // -omit-raw (see args.ts), but even if that ever changed, these fields
+      // can contain the site's injected auth headers (Cookie/Authorization)
+      // verbatim and must never be persisted to disk/SQLite in plaintext.
       raw: {
         templateId: l['template-id'],
         type: l.type,
         host: l.host,
         tags: l.info.tags,
         matcherName: l['matcher-name'],
-        request: truncate(l.request),
-        response: truncate(l.response),
         timestamp: l.timestamp,
       },
     })

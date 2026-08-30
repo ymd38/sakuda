@@ -1,12 +1,14 @@
 import { mkdtempSync, readFileSync, statSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { OutputStreamError, runCommand, SpawnError } from '../runCommand'
 
 describe('runCommand', () => {
   let tmp: string
+  const tmpDirs: string[] = []
   let base: {
     label: string
     cmd: string
@@ -16,8 +18,13 @@ describe('runCommand', () => {
     logger: pino.Logger
   }
 
+  afterAll(async () => {
+    await Promise.all(tmpDirs.map((dir) => rm(dir, { recursive: true, force: true })))
+  })
+
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), 'sakuda-'))
+    tmpDirs.push(tmp)
     base = {
       label: 't',
       cmd: process.execPath,
@@ -106,6 +113,20 @@ describe('runCommand', () => {
         timeoutMs: 5000,
       }),
     ).rejects.toThrow(OutputStreamError)
+  }, 10_000)
+
+  it('strips SAKUDA_ENCRYPTION_KEY from the child even though it is set in the parent (I1)', async () => {
+    process.env.SAKUDA_ENCRYPTION_KEY = 'super-secret-master-key'
+    try {
+      await runCommand({
+        ...base,
+        args: ['-e', 'process.stdout.write(String(process.env.SAKUDA_ENCRYPTION_KEY))'],
+        timeoutMs: 5000,
+      })
+      expect(readFileSync(base.stdoutPath, 'utf8')).toBe('undefined')
+    } finally {
+      delete process.env.SAKUDA_ENCRYPTION_KEY
+    }
   }, 10_000)
 
   it('does not report timedOut for a fast exit while output is still flushing', async () => {

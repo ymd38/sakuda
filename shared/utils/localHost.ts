@@ -20,6 +20,11 @@ export function isLocalUrl(url: string): boolean {
 export function siteRequiresConfirmation(
   frontBaseUrl: string,
   apiBaseUrl: string | null | undefined,
+  openapiUrl?: string | null | undefined,
 ): boolean {
-  return !isLocalUrl(frontBaseUrl) || (!!apiBaseUrl && !isLocalUrl(apiBaseUrl))
+  return (
+    !isLocalUrl(frontBaseUrl) ||
+    (!!apiBaseUrl && !isLocalUrl(apiBaseUrl)) ||
+    (!!openapiUrl && !isLocalUrl(openapiUrl))
+  )
 }

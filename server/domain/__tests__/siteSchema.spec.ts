@@ -73,6 +73,15 @@ describe('SiteInputSchema', () => {
     expect(issue?.message).toContain('nonLocalConfirmed')
   })
 
+  it('requires nonLocalConfirmed when only openapiUrl is non-local (I2)', () => {
+    const issues = issuesFor({
+      ...minimal,
+      openapiUrl: 'https://internal.corp/openapi.json',
+    })
+    const issue = issues.find((i) => i.path.join('.') === 'nonLocalConfirmed')
+    expect(issue?.message).toContain('nonLocalConfirmed')
+  })
+
   it('accepts a non-local frontBaseUrl when nonLocalConfirmed is true', () => {
     const result = SiteInputSchema.safeParse({
       ...minimal,

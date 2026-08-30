@@ -41,6 +41,7 @@ export function buildNucleiArgs(i: NucleiArgsInput): string[] {
     '5',
     '-duc',
     '-nc',
+    '-omit-raw',
     ...headersToNucleiArgs(i.headers),
   ]
 }

@@ -32,10 +32,20 @@ export interface CommandResult {
   durationMs: number
 }
 
-export class SpawnError extends Error {}
+export class SpawnError extends Error {
+  constructor(...args: ConstructorParameters<typeof Error>) {
+    super(...args)
+    this.name = 'SpawnError'
+  }
+}
 
 /** Thrown when capturing stdout/stderr to disk fails (e.g. disk full, permission denied). */
-export class OutputStreamError extends Error {}
+export class OutputStreamError extends Error {
+  constructor(...args: ConstructorParameters<typeof Error>) {
+    super(...args)
+    this.name = 'OutputStreamError'
+  }
+}
 
 /**
  * Spawns `cmd` with `args` (never through a shell), captures stdout/stderr to
@@ -52,9 +62,15 @@ export async function runCommand(opts: RunCommandOptions): Promise<CommandResult
   const { label, logger, killGraceMs = 5000 } = opts
   const startedAt = Date.now()
 
+  // Engine children (ZAP's JVM loading add-ons/scripts, nuclei loading ~10k
+  // community templates) never need SAKUDA_ENCRYPTION_KEY — the master key
+  // that decrypts every stored credential. Strip it from the inherited copy
+  // before overlaying opts.env, so it cannot land in a crash dump,
+  // /proc/<pid>/environ, or a ZAP diagnostic bundle.
+  const { SAKUDA_ENCRYPTION_KEY: _encryptionKey, ...inheritedEnv } = process.env
   const child = spawn(opts.cmd, opts.args, {
     cwd: opts.cwd,
-    env: { ...process.env, ...opts.env },
+    env: { ...inheritedEnv, ...opts.env },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
@@ -150,7 +166,10 @@ export async function runCommand(opts: RunCommandOptions): Promise<CommandResult
         cause: streamError,
       })
     }
-    const oomKilled = signal === 'SIGKILL' || code === 137
+    // A SIGKILL from the timeout escalation (SIGTERM ignored, then SIGKILL)
+    // is a timeout, not an OOM kill — only attribute the OOM runbook to a
+    // SIGKILL/137 that neither the timeout nor an abort caused.
+    const oomKilled = !timedOut && !aborted && (signal === 'SIGKILL' || code === 137)
     const result: CommandResult = {
       code,
       signal,

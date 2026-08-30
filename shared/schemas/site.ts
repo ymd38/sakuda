@@ -59,7 +59,10 @@ export const SiteInputSchema = z
         })
       }
     }
-    if (siteRequiresConfirmation(v.frontBaseUrl, v.apiBaseUrl) && !v.nonLocalConfirmed) {
+    if (
+      siteRequiresConfirmation(v.frontBaseUrl, v.apiBaseUrl, v.openapiUrl) &&
+      !v.nonLocalConfirmed
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['nonLocalConfirmed'],

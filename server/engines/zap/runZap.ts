@@ -42,16 +42,27 @@ export async function runZap(i: ZapRunInput): Promise<ZapRunOutput> {
   await mkdir(i.workDir, { recursive: true })
   const planFile = join(i.workDir, 'plan.yaml')
   const confFile = join(i.workDir, 'replacer.conf')
-  await writeFile(planFile, i.planYaml)
-  const args = ['-cmd']
-  if (i.replacerConf !== null) {
-    // Header values must never be readable by anyone but this process: 0600,
-    // and removed in `finally` below regardless of how the run ends.
-    await writeFile(confFile, i.replacerConf, { mode: 0o600 })
-    args.push('-configfile', zapPath(i.env, i.workDir, 'replacer.conf'))
-  }
-  args.push('-autorun', zapPath(i.env, i.workDir, 'plan.yaml'))
+  // ZAP's default home ($HOME/.ZAP) is process-wide and persistent: it writes
+  // the -configfile replacer values into config.xml (and echoes them to
+  // zap.log) on its own, independent of our replacer.conf cleanup — verified
+  // against the built image (grep "test=1" /home/zap/.ZAP/{config.xml,zap.log}
+  // both matched after a scan with a Cookie header). Giving each run its own
+  // disposable home under workDir means that state dies with the scan instead
+  // of leaking into the next one.
+  const zapHomeDir = join(i.workDir, 'zaphome')
+  await mkdir(zapHomeDir, { recursive: true })
   try {
+    await writeFile(planFile, i.planYaml)
+    const args = ['-dir', zapPath(i.env, i.workDir, 'zaphome'), '-cmd']
+    if (i.replacerConf !== null) {
+      // Header values must never be readable by anyone but this process: 0600,
+      // and removed in `finally` below regardless of how the run ends. Both
+      // writes live inside this `try` so a mid-write failure (ENOSPC, EINTR)
+      // or a throw before spawning still hits the `finally` cleanup.
+      await writeFile(confFile, i.replacerConf, { mode: 0o600 })
+      args.push('-configfile', zapPath(i.env, i.workDir, 'replacer.conf'))
+    }
+    args.push('-autorun', zapPath(i.env, i.workDir, 'plan.yaml'))
     const result = await runCommand({
       label: i.label,
       cmd: i.env.zap.cmd,
@@ -71,6 +82,11 @@ export async function runZap(i: ZapRunInput): Promise<ZapRunOutput> {
     const reportText = existsSync(reportJsonPath) ? await readFile(reportJsonPath, 'utf8') : null
     return { result, reportJsonPath, reportText }
   } finally {
-    await rm(confFile, { force: true }) // header values must not stay on disk
+    // Header values must not stay on disk: replacer.conf is the file we
+    // write ourselves, and zaphome is ZAP's own $HOME (config.xml/zap.log),
+    // which independently persists the same replacer values (see comment
+    // above) if left in place.
+    await rm(confFile, { force: true })
+    await rm(zapHomeDir, { recursive: true, force: true })
   }
 }

@@ -32,11 +32,17 @@ const form = reactive({
 // `shared/utils/localHost.ts` — auto-imported from `shared/utils/*`. A blank
 // or unparsable frontBaseUrl must not show the confirmation gate on a fresh
 // form — `siteRequiresConfirmation('', ...)` would otherwise report `true`
-// because an unparsable URL is treated as "not local".
+// because an unparsable URL is treated as "not local". openapiUrl is the one
+// other user-supplied URL the server dereferences (ZAP's openapi job), so it
+// must gate the same as frontBaseUrl/apiBaseUrl.
 const requiresConfirmation = computed(() => {
   const front = form.frontBaseUrl.trim()
   if (front === '' || !URL.canParse(front)) return false
-  return siteRequiresConfirmation(form.frontBaseUrl, form.apiBaseUrl || null)
+  return siteRequiresConfirmation(
+    form.frontBaseUrl,
+    form.apiBaseUrl || null,
+    form.openapiUrl || null,
+  )
 })
 
 // Headers are write-only: the API never returns values, only `headerNames`.

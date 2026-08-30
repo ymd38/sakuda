@@ -63,7 +63,11 @@ describe('normalizeNucleiLines', () => {
     expect(f.evidence).toBe('a')
     expect(f.severity).toBe('high')
     expect(f.ruleId).toBe('ftp-anon-login')
-    expect(f.raw.request).toBe('GET /ftp HTTP/1.1\r\nHost: host.docker.internal:3001\r\n')
+    // raw.request/raw.response are never persisted, even when nuclei's JSONL
+    // line includes them (e.g. -omit-raw is added to argv, but this is the
+    // last line of defense against the site's auth headers reaching disk).
+    expect(f.raw).not.toHaveProperty('request')
+    expect(f.raw).not.toHaveProperty('response')
   })
 
   it('falls back to host when matched-at is absent', () => {
@@ -84,7 +88,7 @@ describe('normalizeNucleiLines', () => {
     expect(findings[0]!.url).toBe('')
   })
 
-  it('truncates raw.request/response to 4000 chars', () => {
+  it('never stores raw.request/raw.response even for a long request/response pair', () => {
     const long = 'x'.repeat(5000)
     const line = JSON.stringify({
       'template-id': 't1',
@@ -95,7 +99,7 @@ describe('normalizeNucleiLines', () => {
     })
     const { lines } = parseNucleiJsonl(line)
     const { findings } = normalizeNucleiLines(lines, (u) => u)
-    expect((findings[0]!.raw.request as string).length).toBe(4000 + '…[truncated]'.length)
-    expect((findings[0]!.raw.request as string).startsWith('x'.repeat(4000))).toBe(true)
+    expect(findings[0]!.raw).not.toHaveProperty('request')
+    expect(findings[0]!.raw).not.toHaveProperty('response')
   })
 })

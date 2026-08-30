@@ -9,7 +9,11 @@ export function toSitePublic(row: SiteRow): SitePublic {
   const { headersEnc: _enc, ...rest } = row // strip ciphertext
   return {
     ...rest,
-    requiresConfirmation: siteRequiresConfirmation(row.frontBaseUrl, row.apiBaseUrl),
+    requiresConfirmation: siteRequiresConfirmation(
+      row.frontBaseUrl,
+      row.apiBaseUrl,
+      row.openapiUrl,
+    ),
   }
 }
 

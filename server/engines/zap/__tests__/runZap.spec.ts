@@ -79,6 +79,8 @@ describe('runZap', () => {
 
     const argv: unknown = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8'))
     expect(argv).toEqual([
+      '-dir',
+      '/zap/wrk/zaphome',
       '-cmd',
       '-configfile',
       '/zap/wrk/replacer.conf',
@@ -103,6 +105,8 @@ describe('runZap', () => {
 
     const argv: unknown = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8'))
     expect(argv).toEqual([
+      '-dir',
+      join(workDir, 'zaphome'),
       '-cmd',
       '-configfile',
       join(workDir, 'replacer.conf'),
@@ -126,8 +130,48 @@ describe('runZap', () => {
     })
 
     const argv: unknown = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8'))
-    expect(argv).toEqual(['-cmd', '-autorun', join(workDir, 'plan.yaml')])
+    expect(argv).toEqual([
+      '-dir',
+      join(workDir, 'zaphome'),
+      '-cmd',
+      '-autorun',
+      join(workDir, 'plan.yaml'),
+    ])
     expect(existsSync(join(workDir, 'conf-mode.json'))).toBe(false)
+  })
+
+  it('creates a per-run zaphome dir and removes it after the run (I3: ZAP must not persist replacer values in its own $HOME/.ZAP)', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env = makeEnv({}, fakeBin)
+    await runZap({
+      label: 'zap-test',
+      env,
+      workDir,
+      planYaml: 'plan: yes\n',
+      replacerConf: 'x=1\n',
+      timeoutMs: 5000,
+      signal: new AbortController().signal,
+      logger,
+    })
+
+    expect(existsSync(join(workDir, 'zaphome'))).toBe(false)
+  })
+
+  it('removes zaphome when runCommand throws', async () => {
+    const env = makeEnv({}, join(tmp, 'does-not-exist'))
+    await expect(
+      runZap({
+        label: 'zap-test',
+        env,
+        workDir,
+        planYaml: 'plan: yes\n',
+        replacerConf: null,
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        logger,
+      }),
+    ).rejects.toThrow()
+    expect(existsSync(join(workDir, 'zaphome'))).toBe(false)
   })
 
   it('passes JAVA_TOOL_OPTIONS and SAKUDA_ZAP_HOST_WORKDIR to the child', async () => {
@@ -148,6 +192,26 @@ describe('runZap', () => {
       JAVA_TOOL_OPTIONS: '-Xmx2048m',
       SAKUDA_ZAP_HOST_WORKDIR: workDir,
     })
+  })
+
+  it('removes replacer.conf when runCommand throws (I4: write happens inside the try)', async () => {
+    // env.zap.cmd points at a nonexistent binary — runCommand rejects with
+    // SpawnError before any output/report is produced. replacer.conf must
+    // not survive that.
+    const env = makeEnv({}, join(tmp, 'does-not-exist'))
+    await expect(
+      runZap({
+        label: 'zap-test',
+        env,
+        workDir,
+        planYaml: 'plan: yes\n',
+        replacerConf: 'replacer.full_list(0).enabled=true\n',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        logger,
+      }),
+    ).rejects.toThrow()
+    expect(existsSync(join(workDir, 'replacer.conf'))).toBe(false)
   })
 
   it('returns reportText null when no report file was created', async () => {

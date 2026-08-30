@@ -46,8 +46,23 @@ describe('buildNucleiArgs', () => {
       '5',
       '-duc',
       '-nc',
+      '-omit-raw',
       '-H',
       'Cookie: a=b',
     ])
+  })
+
+  it('always includes -omit-raw so request/response pairs (which may contain injected auth headers) are never written to disk', () => {
+    expect(
+      buildNucleiArgs({
+        targetsFile: 't.txt',
+        templatesDir: '/tpl',
+        outputFile: 'o.jsonl',
+        rateLimit: 50,
+        concurrency: 25,
+        tags: ['xss'],
+        headers: [],
+      }),
+    ).toContain('-omit-raw')
   })
 })
