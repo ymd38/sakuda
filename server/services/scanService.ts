@@ -80,14 +80,6 @@ export function createScan(
   if (!siteRow) throw new ServiceError(404, 'SITE_NOT_FOUND', `site ${siteId} not found`)
   const site = toSitePublic(siteRow)
 
-  const active = db
-    .select({ id: scans.id })
-    .from(scans)
-    .where(and(eq(scans.siteId, siteId), inArray(scans.status, [...ACTIVE_STATUSES])))
-    .get()
-  if (active)
-    throw new ServiceError(409, 'SCAN_ACTIVE', `site ${siteId} already has an active scan`)
-
   if (site.requiresConfirmation && !site.nonLocalConfirmed) {
     throw new ServiceError(
       422,
@@ -102,6 +94,14 @@ export function createScan(
     site.nucleiPaths,
     site.openapiUrl !== null || site.openapiJson !== null,
   )
+
+  const active = db
+    .select({ id: scans.id })
+    .from(scans)
+    .where(and(eq(scans.siteId, siteId), inArray(scans.status, [...ACTIVE_STATUSES])))
+    .get()
+  if (active)
+    throw new ServiceError(409, 'SCAN_ACTIVE', `site ${siteId} already has an active scan`)
 
   const id = deps.id()
   const createdAt = deps.now().toISOString()

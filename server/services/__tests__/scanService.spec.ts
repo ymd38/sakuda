@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
 import { engineRuns, scans, sites } from '../../db/schema'
 import { createHeaderCipher } from '../../domain/headerCipher'
+import { toSitePublic, toSiteSnapshot } from '../../domain/siteView'
 import { createSite, type SiteServiceDeps } from '../siteService'
 import { ServiceError } from '../errors'
 import {
@@ -70,6 +71,43 @@ function insertRawSite(overrides: Partial<typeof sites.$inferInsert> = {}) {
   return rowId
 }
 
+/** Inserts a `queued` scan row directly, bypassing `createScan`'s own
+ * validation, so tests can set up "an active scan already exists" for a
+ * site state that `createScan` itself would refuse to create a scan for
+ * (e.g. non-local-unconfirmed, or missing engine prerequisites). */
+function insertActiveScan(siteId: string): void {
+  const siteRow = db.select().from(sites).where(eq(sites.id, siteId)).get()
+  if (!siteRow) throw new Error(`test fixture error: site ${siteId} not found`)
+  db.insert(scans)
+    .values({
+      id: `active-${++n}`,
+      siteId,
+      status: 'queued',
+      engines: ['nuclei'],
+      siteSnapshot: toSiteSnapshot(toSitePublic(siteRow)),
+      error: null,
+      createdAt: now().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+    })
+    .run()
+}
+
+/** Asserts `fn` throws a `ServiceError` with the given status/code, narrowing
+ * via `instanceof` (no `as` cast) rather than duplicating a try/catch with a
+ * cast in every call site. */
+function expectServiceError(fn: () => unknown, statusCode: number, code: string): void {
+  try {
+    fn()
+  } catch (e) {
+    if (!(e instanceof ServiceError)) throw e
+    expect(e.statusCode).toBe(statusCode)
+    expect(e.code).toBe(code)
+    return
+  }
+  throw new Error(`expected a ServiceError(${statusCode}, ${code}) to be thrown`)
+}
+
 describe('createScan', () => {
   it('returns a queued scan with engines ordered by ENGINE_ORDER', () => {
     const site = createSite(siteDeps, base)
@@ -81,69 +119,58 @@ describe('createScan', () => {
   })
 
   it('throws 404 SITE_NOT_FOUND for an unknown site', () => {
-    expect(() => createScan(db, { now, id }, 'nope', ['nuclei'])).toThrow(ServiceError)
-    try {
-      createScan(db, { now, id }, 'nope', ['nuclei'])
-    } catch (e) {
-      expect(e).toBeInstanceOf(ServiceError)
-      expect((e as ServiceError).statusCode).toBe(404)
-      expect((e as ServiceError).code).toBe('SITE_NOT_FOUND')
-    }
+    expectServiceError(() => createScan(db, { now, id }, 'nope', ['nuclei']), 404, 'SITE_NOT_FOUND')
   })
 
   it('rejects a second scan while one is queued/running with 409 SCAN_ACTIVE', () => {
     const site = createSite(siteDeps, base)
     createScan(db, { now, id }, site.id, ['nuclei'])
-    try {
-      createScan(db, { now, id }, site.id, ['nuclei'])
-      expect.fail('expected ServiceError')
-    } catch (e) {
-      expect(e).toBeInstanceOf(ServiceError)
-      expect((e as ServiceError).statusCode).toBe(409)
-      expect((e as ServiceError).code).toBe('SCAN_ACTIVE')
-    }
+    expectServiceError(() => createScan(db, { now, id }, site.id, ['nuclei']), 409, 'SCAN_ACTIVE')
   })
 
   it('422 NON_LOCAL_UNCONFIRMED for a non-local site inserted without confirmation', () => {
     const siteId = insertRawSite()
-    try {
-      createScan(db, { now, id }, siteId, ['nuclei'])
-      expect.fail('expected ServiceError')
-    } catch (e) {
-      expect(e).toBeInstanceOf(ServiceError)
-      expect((e as ServiceError).statusCode).toBe(422)
-      expect((e as ServiceError).code).toBe('NON_LOCAL_UNCONFIRMED')
-    }
+    expectServiceError(
+      () => createScan(db, { now, id }, siteId, ['nuclei']),
+      422,
+      'NON_LOCAL_UNCONFIRMED',
+    )
   })
 
   it('422 ENGINE_PREREQ for zap-api without an openapi source', () => {
     const site = createSite(siteDeps, { ...base, openapiUrl: null })
-    try {
-      createScan(db, { now, id }, site.id, ['zap-api'])
-      expect.fail('expected ServiceError')
-    } catch (e) {
-      expect(e).toBeInstanceOf(ServiceError)
-      expect((e as ServiceError).statusCode).toBe(422)
-      expect((e as ServiceError).code).toBe('ENGINE_PREREQ')
-    }
+    expectServiceError(
+      () => createScan(db, { now, id }, site.id, ['zap-api']),
+      422,
+      'ENGINE_PREREQ',
+    )
   })
 
   it('422 ENGINE_PREREQ for nuclei with empty nucleiPaths', () => {
     const site = createSite(siteDeps, { ...base, nucleiPaths: '' })
-    try {
-      createScan(db, { now, id }, site.id, ['nuclei'])
-      expect.fail('expected ServiceError')
-    } catch (e) {
-      expect(e).toBeInstanceOf(ServiceError)
-      expect((e as ServiceError).statusCode).toBe(422)
-      expect((e as ServiceError).code).toBe('ENGINE_PREREQ')
-    }
+    expectServiceError(() => createScan(db, { now, id }, site.id, ['nuclei']), 422, 'ENGINE_PREREQ')
   })
 
   it('zap-fe has no prerequisite', () => {
     const site = createSite(siteDeps, { ...base, nucleiPaths: '', openapiUrl: null })
     const scan = createScan(db, { now, id }, site.id, ['zap-fe'])
     expect(scan.engines).toEqual(['zap-fe'])
+  })
+
+  it('422 NON_LOCAL_UNCONFIRMED takes priority over an existing active scan', () => {
+    const siteId = insertRawSite()
+    insertActiveScan(siteId)
+    expectServiceError(
+      () => createScan(db, { now, id }, siteId, ['nuclei']),
+      422,
+      'NON_LOCAL_UNCONFIRMED',
+    )
+  })
+
+  it('422 ENGINE_PREREQ takes priority over an existing active scan', () => {
+    const site = createSite(siteDeps, { ...base, nucleiPaths: '' })
+    insertActiveScan(site.id)
+    expectServiceError(() => createScan(db, { now, id }, site.id, ['nuclei']), 422, 'ENGINE_PREREQ')
   })
 })
 
