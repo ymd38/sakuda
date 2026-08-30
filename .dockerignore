@@ -1,0 +1,12 @@
+node_modules
+.nuxt
+.output
+data
+.git
+.env*
+coverage
+tests
+docs
+.superpowers
+*.md
+!README.md
