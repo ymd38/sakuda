@@ -118,8 +118,19 @@ function handleSubmit() {
 
 <template>
   <form data-testid="site-form" class="flex flex-col gap-6" @submit.prevent="handleSubmit">
+    <div class="card flex flex-col gap-1 text-caption-sm text-mute" data-testid="form-legend">
+      <p><span class="text-sale">*</span> = required. Everything else can stay empty.</p>
+      <p>
+        Which engines you can start depends on what you fill in: <strong>ZAP frontend</strong> needs
+        only the base URL + seed path · <strong>Nuclei</strong> needs at least one Nuclei path ·
+        <strong>ZAP API</strong> needs an OpenAPI URL or JSON.
+      </p>
+    </div>
+
     <div class="flex flex-col gap-2">
-      <label for="site-name" class="text-caption-md font-medium text-ink">Name</label>
+      <label for="site-name" class="text-caption-md font-medium text-ink"
+        >Name <span class="text-sale">*</span></label
+      >
       <input
         id="site-name"
         v-model="form.name"
@@ -132,17 +143,21 @@ function handleSubmit() {
 
     <div class="flex flex-col gap-2">
       <label for="site-front-base-url" class="text-caption-md font-medium text-ink"
-        >Front base URL</label
+        >Front base URL <span class="text-sale">*</span></label
       >
       <input
         id="site-front-base-url"
         v-model="form.frontBaseUrl"
         data-testid="front-base-url"
         type="text"
-        placeholder="https://example.com"
+        placeholder="http://localhost:4001"
         required
         class="input-pill"
       />
+      <p class="text-caption-sm text-mute">
+        Scheme + host + port of the web app, no trailing path. Nuclei paths and the ZAP seed path
+        are appended to it.
+      </p>
     </div>
 
     <div class="flex flex-col gap-2">
@@ -157,62 +172,81 @@ function handleSubmit() {
         placeholder="https://api.example.com"
         class="input-pill"
       />
+      <p class="text-caption-sm text-mute">
+        Only when the API lives on a different origin. Used by "api:" Nuclei paths and as the ZAP
+        API target.
+      </p>
     </div>
 
     <div class="flex flex-col gap-2">
       <label for="site-nuclei-paths" class="text-caption-md font-medium text-ink"
-        >Nuclei paths</label
+        >Nuclei paths <span class="text-mute">(required for the Nuclei engine)</span></label
       >
       <textarea
         id="site-nuclei-paths"
         v-model="form.nucleiPaths"
         data-testid="nuclei-paths"
         rows="4"
+        placeholder="/&#10;/api/products&#10;/rest/products/search?q=a&#10;api:/health"
         class="textarea-soft"
       />
       <p class="text-caption-sm text-mute">
-        One path per line, "#" comments, prefix "api:" for apiBaseUrl.
+        The URLs Nuclei scans, one path per line, relative to the front base URL (prefix "api:" to
+        use the API base URL). Nuclei does not crawl — list the pages and endpoints you care about
+        (top page, login, API routes with query params). "#" starts a comment.
       </p>
     </div>
 
     <div class="flex flex-col gap-2">
       <label for="site-openapi-url" class="text-caption-md font-medium text-ink"
-        >OpenAPI URL (optional)</label
+        >OpenAPI URL <span class="text-mute">(ZAP API engine — this or JSON below)</span></label
       >
       <input
         id="site-openapi-url"
         v-model="form.openapiUrl"
         data-testid="openapi-url"
         type="text"
+        placeholder="http://localhost:8080/swagger/doc.json"
         class="input-pill"
       />
+      <p class="text-caption-sm text-mute">
+        URL of the OpenAPI/Swagger document ZAP imports for the active API scan.
+      </p>
     </div>
 
     <div class="flex flex-col gap-2">
       <label for="site-openapi-json" class="text-caption-md font-medium text-ink"
-        >OpenAPI JSON (optional)</label
+        >OpenAPI JSON <span class="text-mute">(paste the document instead of a URL)</span></label
       >
       <textarea
         id="site-openapi-json"
         v-model="form.openapiJson"
         data-testid="openapi-json"
         rows="4"
+        placeholder='{"openapi":"3.0.0","info":{"title":"x","version":"1"},"servers":[{"url":"http://localhost:4001"}],"paths":{"/rest/products/search":{"get":{"parameters":[{"name":"q","in":"query","schema":{"type":"string"}}],"responses":{"200":{"description":"ok"}}}}}}'
         class="textarea-soft"
       />
     </div>
 
     <div class="flex flex-col gap-2">
       <label for="site-zap-fe-seed-path" class="text-caption-md font-medium text-ink"
-        >ZAP frontend seed path</label
+        >ZAP frontend seed path <span class="text-sale">*</span></label
       >
       <input
         id="site-zap-fe-seed-path"
         v-model="form.zapFeSeedPath"
         data-testid="zap-fe-seed-path"
         type="text"
+        placeholder="/"
         required
         class="input-pill"
       />
+      <p class="text-caption-sm text-mute">
+        Where the ZAP spider starts crawling, relative to the front base URL. "/" is fine for most
+        sites; SPAs with hash routing use e.g. "/#/". With auth headers, point it at a page only a
+        logged-in user can reach (e.g. "/dashboard") so sakuda can warn when the session was not
+        accepted.
+      </p>
     </div>
 
     <div class="flex flex-col gap-2">
@@ -226,7 +260,11 @@ function handleSubmit() {
         rows="4"
         class="textarea-soft"
       />
-      <p class="text-caption-sm text-mute">Glob per line, "*" spans "/".</p>
+      <p class="text-caption-sm text-mute">
+        Paths no engine may touch — one glob per line, "*" spans "/". Typical: "/logout",
+        "/auth/refresh", "*/send-code" (anything that ends the session, sends mail, or deletes
+        data).
+      </p>
     </div>
 
     <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
