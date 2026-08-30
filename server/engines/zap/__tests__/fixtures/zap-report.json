@@ -1,0 +1,104 @@
+{
+  "@programName": "ZAP",
+  "@version": "2.17.0",
+  "@generated": "Wed, 26 Aug 2026 15:19:48",
+  "site": [
+    {
+      "@name": "http://host.docker.internal:3000",
+      "@host": "host.docker.internal",
+      "@port": "3000",
+      "@ssl": "false",
+      "alerts": [
+        {
+          "pluginid": "40018",
+          "alertRef": "40018-1",
+          "alert": "SQL Injection",
+          "name": "SQL Injection",
+          "riskcode": "3",
+          "confidence": "2",
+          "riskdesc": "High (Medium)",
+          "desc": "<p>SQL injection may be possible.</p>",
+          "count": "2",
+          "solution": "<p>Do not trust client side input, even if there is client side validation in place.</p>",
+          "otherinfo": "<p>The query time is controllable using parameter value.</p>",
+          "reference": "<p>https://owasp.org/www-community/attacks/SQL_Injection</p>",
+          "cweid": "89",
+          "wascid": "19",
+          "sourceid": "1",
+          "instances": [
+            {
+              "uri": "http://host.docker.internal:3000/company/login?query=1",
+              "method": "GET",
+              "param": "query",
+              "attack": "1' OR '1'='1",
+              "evidence": "SQL syntax error",
+              "otherinfo": "Injectable parameter: query"
+            },
+            {
+              "uri": "http://host.docker.internal:3000/talent/login?query=1",
+              "method": "GET",
+              "param": "query",
+              "attack": "1' OR '1'='1",
+              "evidence": "SQL syntax error",
+              "otherinfo": "Injectable parameter: query"
+            }
+          ]
+        },
+        {
+          "pluginid": "10098",
+          "alertRef": "10098",
+          "alert": "Cross-Domain Misconfiguration",
+          "name": "Cross-Domain Misconfiguration",
+          "riskcode": "2",
+          "confidence": "2",
+          "riskdesc": "Medium (Medium)",
+          "desc": "<p>Web browser data loading may be possible, due to a Cross Origin Resource Sharing (CORS) misconfiguration on the web server.</p>",
+          "count": "1",
+          "solution": "<p>Configure the \"Access-Control-Allow-Origin\" HTTP header to a more restrictive set of domains.</p>",
+          "otherinfo": "<p>The endpoint rejected the request before CORS headers were evaluated.</p>",
+          "reference": "<p>https://vulncat.fortify.com/en/detail?category=HTML5&subcategory=Overly%20Permissive%20CORS%20Policy</p>",
+          "cweid": "264",
+          "wascid": "14",
+          "sourceid": "104",
+          "instances": [
+            {
+              "uri": "http://host.docker.internal:3000/company/admin",
+              "method": "GET",
+              "param": "",
+              "attack": "",
+              "evidence": "401 Unauthorized",
+              "otherinfo": "WWW-Authenticate: Basic realm=\"admin\""
+            }
+          ]
+        },
+        {
+          "pluginid": "10038",
+          "alertRef": "10038-3",
+          "alert": "Content Security Policy (CSP) Report-Only Header Found",
+          "name": "Content Security Policy (CSP) Report-Only Header Found",
+          "riskcode": "0",
+          "confidence": "3",
+          "riskdesc": "Informational (High)",
+          "desc": "<p>The response contained a Content-Security-Policy-Report-Only header, this may indicate a work-in-progress implementation.</p><p>CSP is an added layer of security that helps to detect and mitigate certain types of attacks.</p>",
+          "count": "1",
+          "solution": "<p>Ensure that your web server, application server, load balancer, etc. is configured to set the Content-Security-Policy header.</p>",
+          "otherinfo": "",
+          "reference": "<p>https://www.w3.org/TR/CSP2/</p><p>https://content-security-policy.com/</p>",
+          "cweid": "693",
+          "wascid": "15",
+          "sourceid": "23",
+          "instances": [
+            {
+              "uri": "http://host.docker.internal:3000/",
+              "method": "GET",
+              "param": "",
+              "attack": "",
+              "evidence": "",
+              "otherinfo": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
