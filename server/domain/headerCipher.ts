@@ -6,9 +6,19 @@ const NONCE_LEN = 12
 const TAG_LEN = 16
 const KEY_LEN = 32
 
-export class InvalidKeyError extends Error {}
+export class InvalidKeyError extends Error {
+  constructor(...args: ConstructorParameters<typeof Error>) {
+    super(...args)
+    this.name = 'InvalidKeyError'
+  }
+}
 
-export class DecryptError extends Error {}
+export class DecryptError extends Error {
+  constructor(...args: ConstructorParameters<typeof Error>) {
+    super(...args)
+    this.name = 'DecryptError'
+  }
+}
 
 export interface HeaderCipher {
   seal(headers: Header[], siteId: string): Buffer
@@ -30,7 +40,7 @@ export function createHeaderCipher(keyBase64: string): HeaderCipher {
       const parsed = HeadersSchema.parse(headers)
       if (parsed.length === 0) throw new Error('no headers to encrypt')
       const nonce = randomBytes(NONCE_LEN)
-      const cipher = createCipheriv('aes-256-gcm', key, nonce)
+      const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: TAG_LEN })
       cipher.setAAD(aad(VERSION, siteId))
       const ct = Buffer.concat([cipher.update(JSON.stringify(parsed), 'utf8'), cipher.final()])
       return Buffer.concat([Buffer.from([VERSION]), nonce, ct, cipher.getAuthTag()])
@@ -43,7 +53,7 @@ export function createHeaderCipher(keyBase64: string): HeaderCipher {
       const nonce = envelope.subarray(1, 1 + NONCE_LEN)
       const tag = envelope.subarray(envelope.length - TAG_LEN)
       const ct = envelope.subarray(1 + NONCE_LEN, envelope.length - TAG_LEN)
-      const decipher = createDecipheriv('aes-256-gcm', key, nonce)
+      const decipher = createDecipheriv('aes-256-gcm', key, nonce, { authTagLength: TAG_LEN })
       decipher.setAAD(aad(version, siteId))
       decipher.setAuthTag(tag)
       let plain: string
