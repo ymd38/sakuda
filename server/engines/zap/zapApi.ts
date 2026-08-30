@@ -67,6 +67,7 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
     signal,
     logger,
   })
+  if (run.result.aborted) throw new EngineError('zap-api aborted: server shutting down')
   if (run.reportText === null)
     throw new EngineError(
       `zap-api produced no ${ZAP_REPORT_JSON} (exit ${run.result.code ?? 'null'}, signal ${run.result.signal ?? 'none'}${run.result.timedOut ? ', timed out' : ''}); see ${join(workDir, 'stdout.log')}`,

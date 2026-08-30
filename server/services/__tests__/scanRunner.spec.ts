@@ -1,14 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { eq, sql } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
 import { engineRuns, findings, scans, sites } from '../../db/schema'
 import { parseEnv, type Env } from '../../config/env'
-import { createHeaderCipher } from '../../domain/headerCipher'
+import { createHeaderCipher, DecryptError } from '../../domain/headerCipher'
 import { EngineError, type EngineOutput, type EngineRunner } from '../../engines/types'
 import { logger } from '../../lib/logger'
 import { createSite, type SiteServiceDeps } from '../siteService'
@@ -32,6 +33,11 @@ let siteDeps: SiteServiceDeps
 let n = 0
 const now = () => new Date('2026-02-01T00:00:00.000Z')
 const id = () => `id-${++n}`
+const tmpDataDirs: string[] = []
+
+afterAll(async () => {
+  await Promise.all(tmpDataDirs.map((dir) => rm(dir, { recursive: true, force: true })))
+})
 
 function successOutput(overrides: Partial<EngineOutput> = {}): EngineOutput {
   return {
@@ -58,9 +64,11 @@ function makeDeps(runners: Partial<Record<Engine, EngineRunner>>): ScanRunnerDep
 beforeEach(() => {
   n = 0
   db = openDatabase({ file: ':memory:', migrationsFolder })
+  const dataDir = mkdtempSync(join(tmpdir(), 'sakuda-scanrunner-'))
+  tmpDataDirs.push(dataDir)
   env = parseEnv({
     SAKUDA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
-    SAKUDA_DATA_DIR: mkdtempSync(join(tmpdir(), 'sakuda-scanrunner-')),
+    SAKUDA_DATA_DIR: dataDir,
   })
   siteDeps = { db, cipher: createHeaderCipher(env.encryptionKey), now, id: randomUUID }
 })
@@ -188,6 +196,32 @@ describe('runScan', () => {
     await expect(
       runScan(deps, 'missing-scan', new AbortController().signal),
     ).resolves.toBeUndefined()
+  })
+
+  it('marks the scan failed (never stuck running) when loading the site throws outside the engine loop', async () => {
+    // headersEnc must be non-null so loadSiteWithHeaders actually calls
+    // cipher.open (an empty header set short-circuits to `[]`).
+    const site = createSite(siteDeps, { ...base, headers: [{ name: 'Cookie', value: 'a=b' }] })
+    const scan = createScan(db, { now, id }, site.id, ['nuclei'])
+    const deps = makeDeps({})
+    // Simulate a rotated/corrupt encryption key: cipher.open throws
+    // DecryptError from inside loadSiteWithHeaders, before the per-engine
+    // try/catch in runScan is ever reached.
+    deps.cipher = {
+      seal: siteDeps.cipher.seal,
+      open: () => {
+        throw new DecryptError('decryption failed (key/AAD mismatch or tampering)')
+      },
+    }
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('failed')
+    expect(scanRow?.finishedAt).not.toBeNull()
+    expect(scanRow?.error).toContain('scan runner crashed')
+    expect(scanRow?.error).toContain('decryption failed')
+    expect(deps.runners.nuclei).not.toHaveBeenCalled()
   })
 
   it('fails the scan when the site was deleted before the scan started', async () => {

@@ -150,6 +150,29 @@ describe('runNuclei', () => {
     ).rejects.toThrow(EngineError)
   })
 
+  it('throws a clean "aborted" EngineError (not a confusing exit-code diagnosis) when the signal is already aborted (I6)', async () => {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const ac = new AbortController()
+    ac.abort()
+    await expect(
+      runNuclei({
+        scanId: 'scan-4',
+        engine: 'nuclei',
+        site: baseSite(),
+        workDir,
+        env,
+        logger,
+        signal: ac.signal,
+      }),
+    ).rejects.toThrow('nuclei aborted: server shutting down')
+  })
+
   it('throws EngineError with no target URLs, before spawning the binary', async () => {
     const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
     const env: Env = parseEnv({

@@ -49,6 +49,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     signal,
     logger,
   })
+  if (run.result.aborted) throw new EngineError('zap-fe aborted: server shutting down')
   if (run.reportText === null)
     throw new EngineError(
       `zap-fe produced no ${ZAP_REPORT_JSON} (exit ${run.result.code ?? 'null'}, signal ${run.result.signal ?? 'none'}${run.result.timedOut ? ', timed out' : ''}); see ${join(workDir, 'stdout.log')}`,

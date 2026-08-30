@@ -46,6 +46,7 @@ export class EngineError extends Error {
     options?: ErrorOptions,
   ) {
     super(message, options)
+    this.name = 'EngineError'
   }
 }
 

@@ -55,6 +55,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
     signal,
     logger,
   })
+  if (result.aborted) throw new EngineError('nuclei aborted: server shutting down')
   const jsonl = existsSync(outputFile) ? await readFile(outputFile, 'utf8') : ''
   const { lines, invalidLines } = parseNucleiJsonl(jsonl)
   if (result.code !== 0 && !result.timedOut && lines.length === 0)
