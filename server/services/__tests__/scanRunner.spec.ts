@@ -117,6 +117,43 @@ describe('runScan', () => {
     expect(scanRow?.finishedAt).not.toBeNull()
   })
 
+  it('passes zap-fe reached URLs to nuclei as extraTargets when zap-fe succeeds first', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei', 'zap-fe'])
+    const reachedUrls = ['http://localhost:3001/crawled-a', 'http://localhost:3001/crawled-b']
+    const zapFeRunner = vi.fn(async () => successOutput({ meta: { reachedUrls } }))
+    const nucleiRunner = vi.fn(async () => successOutput())
+    const deps = makeDeps({ 'zap-fe': zapFeRunner, nuclei: nucleiRunner })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    // ENGINE_ORDER runs zap-fe before nuclei, so nuclei must see zap-fe's output.
+    expect(zapFeRunner.mock.invocationCallOrder[0]).toBeLessThan(
+      nucleiRunner.mock.invocationCallOrder[0]!,
+    )
+    expect(nucleiRunner).toHaveBeenCalledWith(
+      expect.objectContaining({ extraTargets: reachedUrls }),
+    )
+  })
+
+  it('does not pass extraTargets to nuclei when zap-fe failed', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei', 'zap-fe'])
+    const nucleiRunner = vi.fn(async () => successOutput())
+    const deps = makeDeps({
+      'zap-fe': vi.fn(async () => {
+        throw new EngineError('zap-fe boom')
+      }),
+      nuclei: nucleiRunner,
+    })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    expect(nucleiRunner).toHaveBeenCalledTimes(1)
+    const call = nucleiRunner.mock.calls[0]?.[0] as { extraTargets?: string[] }
+    expect(call?.extraTargets).toBeUndefined()
+  })
+
   it('keeps running other engines when one fails, and records the runbook', async () => {
     const site = createSite(siteDeps, base)
     const scan = createScan(db, { now, id }, site.id, ['nuclei', 'zap-fe'])

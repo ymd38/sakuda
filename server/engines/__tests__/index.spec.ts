@@ -5,8 +5,8 @@ import { runZapFe } from '../zap/zapFe'
 import { engineRunners, ENGINE_ORDER, orderEngines } from '../index'
 
 describe('ENGINE_ORDER / engineRunners', () => {
-  it('lists nuclei, zap-api, zap-fe in that order', () => {
-    expect(ENGINE_ORDER).toEqual(['nuclei', 'zap-api', 'zap-fe'])
+  it('lists zap-api, zap-fe, nuclei in that order (nuclei runs last so it can pick up zap-fe reached URLs)', () => {
+    expect(ENGINE_ORDER).toEqual(['zap-api', 'zap-fe', 'nuclei'])
   })
 
   it('maps every engine to its runner', () => {
@@ -18,7 +18,7 @@ describe('ENGINE_ORDER / engineRunners', () => {
 
 describe('orderEngines', () => {
   it('reorders to ENGINE_ORDER regardless of input order', () => {
-    expect(orderEngines(['zap-fe', 'nuclei', 'zap-api'])).toEqual(['nuclei', 'zap-api', 'zap-fe'])
+    expect(orderEngines(['zap-fe', 'nuclei', 'zap-api'])).toEqual(['zap-api', 'zap-fe', 'nuclei'])
   })
 
   it('drops engines not present in the input', () => {

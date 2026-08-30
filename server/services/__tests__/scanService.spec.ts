@@ -111,9 +111,9 @@ function expectServiceError(fn: () => unknown, statusCode: number, code: string)
 describe('createScan', () => {
   it('returns a queued scan with engines ordered by ENGINE_ORDER', () => {
     const site = createSite(siteDeps, base)
-    const scan = createScan(db, { now, id }, site.id, ['zap-fe', 'nuclei'])
+    const scan = createScan(db, { now, id }, site.id, ['nuclei', 'zap-fe'])
     expect(scan.status).toBe('queued')
-    expect(scan.engines).toEqual(['nuclei', 'zap-fe'])
+    expect(scan.engines).toEqual(['zap-fe', 'nuclei'])
     expect(scan.siteId).toBe(site.id)
     expect(scan.counts).toEqual({ critical: 0, high: 0, medium: 0, low: 0, info: 0 })
   })

@@ -4,7 +4,7 @@ import type { EngineRunner } from './types'
 import { runZapApi } from './zap/zapApi'
 import { runZapFe } from './zap/zapFe'
 
-export const ENGINE_ORDER: readonly Engine[] = ['nuclei', 'zap-api', 'zap-fe']
+export const ENGINE_ORDER: readonly Engine[] = ['zap-api', 'zap-fe', 'nuclei']
 
 export const engineRunners: Record<Engine, EngineRunner> = {
   nuclei: runNuclei,

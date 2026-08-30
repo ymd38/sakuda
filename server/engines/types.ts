@@ -26,6 +26,9 @@ export interface EngineInput {
   env: Env
   logger: Logger
   signal: AbortSignal
+  /** Absolute URLs reached by an earlier zap-fe run in the same scan, offered
+   * as additional targets (currently consumed by nuclei). */
+  extraTargets?: string[]
 }
 
 export interface EngineOutput {

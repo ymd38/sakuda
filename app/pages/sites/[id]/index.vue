@@ -102,6 +102,14 @@ async function handleStartScan() {
               No nuclei paths configured — scans the base URL only. Add paths in Edit to cover more
               pages/endpoints.
             </p>
+            <p
+              v-if="zapFeChecked && nucleiChecked"
+              data-testid="nuclei-crawled-hint"
+              class="text-caption-sm text-mute mt-1"
+            >
+              When ZAP frontend runs in the same scan, the URLs its spider reached are added to
+              nuclei's targets.
+            </p>
           </div>
 
           <div>

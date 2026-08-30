@@ -173,6 +173,43 @@ describe('runNuclei', () => {
     ).rejects.toThrow('nuclei aborted: server shutting down')
   })
 
+  it('adds extraTargets (e.g. zap-fe reached URLs) to the target list and reports crawledTargetCount', async () => {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const out = await runNuclei({
+      scanId: 'scan-5',
+      engine: 'nuclei',
+      site: baseSite({ nucleiPaths: '/a' }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+      extraTargets: [
+        'http://localhost:3001/crawled-page',
+        'http://localhost:3001/a', // dupe of base, should not be added again
+        'http://evil.example/off-origin', // different origin, dropped
+      ],
+    })
+
+    expect(readFileSync(join(workDir, 'targets.txt'), 'utf8')).toBe(
+      'http://localhost:3001/a\nhttp://localhost:3001/crawled-page\n',
+    )
+    expect(out.meta.urlCount).toBe(2)
+    expect(out.meta.crawledTargetCount).toBe(1)
+    expect(out.meta.crawledDropped).toEqual({
+      sameOriginOnly: 1,
+      excluded: 0,
+      asset: 0,
+      capped: 0,
+      invalid: 0,
+    })
+  })
+
   it('throws EngineError with no target URLs, before spawning the binary', async () => {
     const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
     const env: Env = parseEnv({

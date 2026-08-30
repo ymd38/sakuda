@@ -4,7 +4,9 @@ A self-hosted DAST (dynamic application security testing) app. Register a
 **site**, run scans against it with **nuclei**, **ZAP API** (active scan
 against an OpenAPI spec) and/or **ZAP frontend** (spider + baseline against a
 seed page), and browse the results from the UI: per-engine findings, a
-diff against the previous scan, Markdown export, and history charts.
+diff against the previous scan, Markdown export, and history charts. Nuclei
+always runs last: when ZAP frontend runs in the same scan, the URLs its
+spider reached are added as extra nuclei targets.
 
 MVP scope: sites → scans → per-engine reports. See
 [Not in this MVP](#not-in-this-mvp) for what's deliberately out.
