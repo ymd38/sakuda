@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import ScanStatusBadge from '~/components/scan/ScanStatusBadge.vue'
-import type { Engine, ScanSummary, SitePublic } from '#shared/types/api'
+import SeverityStackChart from '~/components/chart/SeverityStackChart.vue'
+import EngineCountChart from '~/components/chart/EngineCountChart.vue'
+import DiffTrendChart from '~/components/chart/DiffTrendChart.vue'
+import type { Engine, HistoryPoint, ScanSummary, SitePublic } from '#shared/types/api'
 
 const route = useRoute()
 // `route.params.id` is `string | string[]` generically; this route only has
@@ -10,6 +13,7 @@ const siteId = Array.isArray(rawSiteId) ? (rawSiteId[0] ?? '') : rawSiteId
 
 const { data: site, error: siteError } = await useFetch<SitePublic>(`/api/sites/${siteId}`)
 const { data: scans } = await useFetch<ScanSummary[]>(`/api/sites/${siteId}/scans`)
+const { data: history } = await useFetch<HistoryPoint[]>(`/api/sites/${siteId}/history`)
 
 const nucleiChecked = ref(false)
 const zapApiChecked = ref(false)
@@ -69,7 +73,14 @@ async function handleStartScan() {
         <NuxtLink :to="`/sites/${siteId}/edit`" class="btn-secondary">Edit</NuxtLink>
       </div>
 
-      <!-- charts (Task 14) -->
+      <section class="mt-6">
+        <h2 class="font-display text-heading-md uppercase">History</h2>
+        <div class="mt-2 grid gap-6 md:grid-cols-3">
+          <SeverityStackChart :history="history ?? []" />
+          <EngineCountChart :history="history ?? []" />
+          <DiffTrendChart :history="history ?? []" />
+        </div>
+      </section>
 
       <section class="card mt-6 flex flex-col gap-4">
         <h2 class="font-display text-heading-md uppercase">Start scan</h2>

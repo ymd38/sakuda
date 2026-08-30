@@ -1,4 +1,4 @@
-import type { EngineRunView, FindingView, ScanDetail } from '#shared/types/api'
+import type { EngineRunView, FindingView, HistoryPoint, ScanDetail } from '#shared/types/api'
 
 /** Shared scan/engine/finding fixture builders for component and page specs
  * — kept here so EngineRunPanel.spec.ts and scans-id.spec.ts build the same
@@ -72,6 +72,19 @@ export function scanDetailFixture(overrides: Partial<ScanDetail> = {}): ScanDeta
     },
     engineRuns: [engineRunFixture()],
     findings: [findingFixture()],
+    diff: null,
+    ...overrides,
+  }
+}
+
+export function historyPointFixture(overrides: Partial<HistoryPoint> = {}): HistoryPoint {
+  return {
+    scanId: 'scan-1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    finishedAt: '2026-01-01T00:05:00.000Z',
+    status: 'done',
+    counts: { critical: 1, high: 2, medium: 3, low: 4, info: 5 },
+    engines: { nuclei: { critical: 1, high: 2, medium: 3, low: 4, info: 5 } },
     diff: null,
     ...overrides,
   }
