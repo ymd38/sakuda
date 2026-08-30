@@ -8,28 +8,40 @@ import * as schema from './schema'
 
 export type Db = BetterSQLite3Database<typeof schema>
 
-export function openDatabase(opts: { file: string; migrationsFolder: string }): Db {
-  if (opts.file !== ':memory:') mkdirSync(dirname(opts.file), { recursive: true })
-  const sqlite = new Database(opts.file)
+function openSqlite(file: string): Database.Database {
+  if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true })
+  const sqlite = new Database(file)
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   sqlite.pragma('busy_timeout = 5000')
+  return sqlite
+}
+
+export function openDatabase(opts: { file: string; migrationsFolder: string }): Db {
+  const sqlite = openSqlite(opts.file)
   const db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: opts.migrationsFolder })
   return db
 }
 
+// Tracked alongside `instance` (rather than read back via drizzle's `$client`
+// accessor) so closing the singleton never depends on cross-module-instance
+// structural typing of drizzle's generic client parameter.
 let instance: Db | undefined
+let handle: Database.Database | undefined
 
 export function getDb(): Db {
   if (!instance) {
     const env = getEnv()
-    instance = openDatabase({ file: env.dbFile, migrationsFolder: env.migrationsDir })
+    handle = openSqlite(env.dbFile)
+    instance = drizzle(handle, { schema })
+    migrate(instance, { migrationsFolder: env.migrationsDir })
   }
   return instance
 }
 
 export function closeDb(): void {
-  instance?.$client.close()
+  handle?.close()
   instance = undefined
+  handle = undefined
 }
