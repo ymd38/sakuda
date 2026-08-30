@@ -8,5 +8,8 @@ coverage
 tests
 docs
 .superpowers
+.claude
+Makefile
+docker-compose.yml
 *.md
 !README.md

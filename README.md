@@ -12,25 +12,47 @@ MVP scope: sites → scans → per-engine reports. See
 ## Quick start (Docker)
 
 Everything — the app, nuclei + templates, and ZAP — ships in one image.
+`docker-compose.yml` + `Makefile` wrap the commands; every port and secret is
+read from `.env`.
 
 ```bash
-docker build -t sakuda .
+make env      # .env from .env.example with a fresh SAKUDA_ENCRYPTION_KEY
+make build    # build the image (10–20 min the first time)
+make up       # start → http://localhost:3001
+make logs     # follow logs · make down · make restart · make ps
+```
 
-docker run -d --name sakuda -p 127.0.0.1:3000:3000 --shm-size=1g \
+`make help` lists every target. Without make:
+
+```bash
+docker compose up -d sakuda          # same thing, reads .env
+# or plain docker:
+docker build -t sakuda .
+docker run -d --name sakuda -p 127.0.0.1:3001:3000 --shm-size=1g \
   --add-host=host.docker.internal:host-gateway \
   -e SAKUDA_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
   -v sakuda-data:/data \
   sakuda
 ```
 
-Open http://localhost:3000.
+### Ports
+
+The container always listens on **3000**; the host-side ports come from
+`.env` so sakuda can coexist with other local stacks:
+
+| `.env` variable  | Default     | What                                                     |
+| ---------------- | ----------- | -------------------------------------------------------- |
+| `SAKUDA_PORT`    | `3001`      | sakuda UI/API (`make up`, `make dev`)                    |
+| `JUICESHOP_PORT` | `4001`      | OWASP Juice Shop dry-run target (`make juice-up`)        |
+| `SAKUDA_BIND`    | `127.0.0.1` | Bind address for published ports — keep it loopback-only |
+
+Override per invocation with `make up SAKUDA_PORT=3005`.
 
 - **Trust model: sakuda has no authentication.** Anyone who can reach the
   port can read/create/modify sites (including their configured headers) and
-  start scans against arbitrary hosts. Bind it to loopback only (as above,
-  `-p 127.0.0.1:3000:3000`) or put it behind an authenticating reverse proxy —
-  never publish it directly (`-p 3000:3000` / `0.0.0.0`) on a shared or
-  internet-facing host.
+  start scans against arbitrary hosts. Bind it to loopback only (the default
+  `SAKUDA_BIND=127.0.0.1`) or put it behind an authenticating reverse proxy —
+  never publish it on `0.0.0.0` on a shared or internet-facing host.
 - **Keep the key.** `SAKUDA_ENCRYPTION_KEY` encrypts stored request headers
   (Cookie/Bearer/etc.) at rest. If you lose it, those headers become
   permanently unreadable — write it down somewhere safe (e.g. a password
@@ -69,8 +91,7 @@ a copyable local `.env`.
 
 ```bash
 pnpm install
-cp .env.example .env
-pnpm keygen                 # paste the output into SAKUDA_ENCRYPTION_KEY in .env
+make env                    # .env with a fresh key (or: cp .env.example .env && pnpm keygen)
 ```
 
 nuclei runs as a native binary and ZAP runs via Docker in dev:
@@ -92,12 +113,15 @@ nuclei runs as a native binary and ZAP runs via Docker in dev:
 Then:
 
 ```bash
-pnpm dev            # http://localhost:3000
-pnpm test           # unit + component tests
-pnpm test:e2e       # API e2e tests
-pnpm run lint
-pnpm run typecheck
+make dev            # nuxt dev on SAKUDA_PORT → http://localhost:3001
+make test           # unit + component tests
+make e2e            # API e2e tests
+make lint · make typecheck · make check (all three)
+make juice-up       # Juice Shop on JUICESHOP_PORT as a scan target
 ```
+
+(`pnpm dev --port 3001`, `pnpm test`, `pnpm test:e2e`, `pnpm run lint`,
+`pnpm run typecheck` underneath.)
 
 ## Scan data on disk
 
