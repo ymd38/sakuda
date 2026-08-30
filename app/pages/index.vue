@@ -1,24 +1,8 @@
 <script setup lang="ts">
-import type { ScanStatus, SiteListItem } from '#shared/types/api'
+import ScanStatusBadge from '~/components/scan/ScanStatusBadge.vue'
+import type { SiteListItem } from '#shared/types/api'
 
 const { data: sites } = await useFetch<SiteListItem[]>('/api/sites')
-
-function statusTextClass(status: ScanStatus): string {
-  switch (status) {
-    case 'failed':
-      return 'text-sale'
-    case 'done':
-      return 'text-success'
-    case 'running':
-      return 'text-info'
-    case 'queued':
-      return 'text-mute'
-    default: {
-      const exhaustive: never = status
-      return exhaustive
-    }
-  }
-}
 </script>
 
 <template>
@@ -44,9 +28,7 @@ function statusTextClass(status: ScanStatus): string {
         </div>
 
         <div v-if="site.lastScan" class="flex flex-wrap items-center gap-2">
-          <span class="badge" :class="statusTextClass(site.lastScan.status)">{{
-            site.lastScan.status
-          }}</span>
+          <ScanStatusBadge :status="site.lastScan.status" />
           <span class="text-caption-sm text-mute">{{ site.lastScan.createdAt.slice(0, 10) }}</span>
           <span class="text-caption-sm text-ink"
             >{{ reportedTotal(site.lastScan.counts) }} findings</span

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import SiteForm from '~/components/site/SiteForm.vue'
+import { buttonElement, inputElement } from '../helpers/dom'
 import { SiteInputSchema, type SiteInput } from '#shared/schemas/site'
 import type { SitePublic } from '#shared/types/api'
 
@@ -24,26 +25,8 @@ const editSite: SitePublic = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 }
 
-/** Structural shape of what we need from a `mountSuspended` result — narrow
- * on purpose so this file never needs `VueWrapper<any>`. */
-interface ElementWrapper {
-  find: (selector: string) => { element: Element }
-}
-
 interface EmitsSubmit {
   emitted: (name: string) => unknown[][] | undefined
-}
-
-function inputElement(wrapper: ElementWrapper, selector: string): HTMLInputElement {
-  const el = wrapper.find(selector).element
-  if (!(el instanceof HTMLInputElement)) throw new Error(`expected an <input> at ${selector}`)
-  return el
-}
-
-function buttonElement(wrapper: ElementWrapper, selector: string): HTMLButtonElement {
-  const el = wrapper.find(selector).element
-  if (!(el instanceof HTMLButtonElement)) throw new Error(`expected a <button> at ${selector}`)
-  return el
 }
 
 /** Validates (rather than casts) the emitted payload against the real
