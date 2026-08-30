@@ -8,81 +8,14 @@ import type {
 } from '#shared/types/api'
 import { addCounts, emptyCounts, REPORTED_SEVERITIES } from '#shared/utils/severity'
 import { engineMetaTable } from './markdownEngineMeta'
+import { code, fence, fmtDuration, metaStringArray, text } from './markdownHelpers'
 
 const MAX_URLS = 60
 const MAX_EVIDENCE_CHARS = 120
 const MAX_REF_LINES = 3
 
-// ---------- Markdown-safety helpers ----------
-// Table cells and code spans must never let a finding/warning field break the
-// document structure: a stray backtick would close a code span early, a pipe
-// would split a table row, a newline would break out of the current line.
-// Exported for markdownEngineMeta.ts, which renders the per-engine metadata
-// table with the same safety rules.
-
-/** Wraps a value as inline code, neutralising characters that would break
- * the span itself or a table cell it sits in. */
-export function code(s: string | null | undefined): string {
-  return '`' + (s ?? '').replace(/[`\r\n]/g, ' ').replace(/\|/g, '\\|') + '`'
-}
-
-/** Plain text safe for a Markdown table cell / single line. */
-export function text(s: string | null | undefined): string {
-  return (s ?? '').replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|')
-}
-
 function firstLine(s: string | null | undefined): string {
   return text((s ?? '').split(/\r?\n/)[0])
-}
-
-export function fmtDuration(sec: number | undefined): string {
-  if (sec === undefined || sec <= 0) return '?'
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}m${s.toString().padStart(2, '0')}s`
-}
-
-/** Fences `content` for a code block, escalating the fence marker if the
- * content itself contains a triple-backtick sequence. */
-function fence(content: string): string[] {
-  const marker = content.includes('```') ? '````' : '```'
-  return [marker, content, marker]
-}
-
-// ---------- meta narrowing helpers (no `as` casts) ----------
-// Exported for markdownEngineMeta.ts to read engine-specific `meta` fields
-// without casting the `Record<string, unknown>` the DB layer hands back.
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-export function metaNumber(meta: Record<string, unknown>, key: string): number | undefined {
-  const v = meta[key]
-  return typeof v === 'number' ? v : undefined
-}
-
-export function metaString(meta: Record<string, unknown>, key: string): string | undefined {
-  const v = meta[key]
-  return typeof v === 'string' ? v : undefined
-}
-
-export function metaStringArray(meta: Record<string, unknown>, key: string): string[] | undefined {
-  const v = meta[key]
-  if (!Array.isArray(v)) return undefined
-  return v.every((x): x is string => typeof x === 'string') ? v : undefined
-}
-
-export function metaRecord(
-  meta: Record<string, unknown>,
-  key: string,
-): Record<string, unknown> | undefined {
-  const v = meta[key]
-  return isRecord(v) ? v : undefined
-}
-
-export function metaBoolean(meta: Record<string, unknown>, key: string): boolean {
-  return meta[key] === true
 }
 
 // ---------- top-level sections ----------
@@ -175,7 +108,7 @@ function engineSection(run: EngineRunView, findings: FindingView[]): string[] {
   if (run.warnings.length > 0) out.push('')
   if (run.status === 'failed') {
     out.push('Status: failed', '')
-    out.push(...fence(text(run.error ?? 'unknown error')), '')
+    out.push(...fence(run.error ?? 'unknown error'), '')
   }
   out.push(...findingsBlock(findings))
   if (run.engine === 'zap-fe') out.push(...reachedUrlsBlock(run.meta))

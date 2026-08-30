@@ -8,7 +8,7 @@ import {
   metaString,
   metaStringArray,
   text,
-} from './markdownReport'
+} from './markdownHelpers'
 
 /** Renders the `| Item | Value |` metadata table for one engine run: the
  * generic exit/duration rows shared by every engine, followed by rows built
@@ -44,8 +44,8 @@ function nucleiRows(meta: Record<string, unknown>): string[] {
   if (urlCount !== undefined) rows.push(`| Target URLs | ${urlCount} |`)
   const excludedUrls = metaStringArray(meta, 'excludedUrls')
   if (excludedUrls) rows.push(`| Excluded URLs | ${excludedUrls.length} |`)
-  const tags = metaString(meta, 'tags')
-  if (tags) rows.push(`| Tags | ${code(tags)} |`)
+  const tags = metaStringArray(meta, 'tags')
+  if (tags && tags.length > 0) rows.push(`| Tags | ${code(tags.join(','))} |`)
   const rateLimit = metaNumber(meta, 'rateLimit')
   if (rateLimit !== undefined) rows.push(`| Rate limit | ${rateLimit} req/s |`)
   const concurrency = metaNumber(meta, 'concurrency')

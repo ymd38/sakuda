@@ -52,7 +52,7 @@ const nucleiRun: EngineRunView = {
   meta: {
     urlCount: 12,
     excludedUrls: ['/health'],
-    tags: 'cve,exposure',
+    tags: ['cve', 'exposure'],
     rateLimit: 50,
     concurrency: 25,
     templatesDir: '/opt/nuclei-templates',
@@ -226,6 +226,10 @@ describe('buildScanMarkdown', () => {
     expect(lines).toContain('| Rate limit | 50 req/s |')
   })
 
+  it('renders the nuclei Tags row from the real string[] meta shape', () => {
+    expect(lines).toContain('| Tags | `cve,exposure` |')
+  })
+
   it('renders findings grouped by severity with a NEW marker', () => {
     expect(lines).toContain('### high')
     expect(lines).toContain('#### exposed-panel — Exposed Admin Panel **NEW**')
@@ -284,5 +288,16 @@ describe('buildScanMarkdown', () => {
     expect(md).toContain(
       '```\nzap-api produced no report.json (exit 1, signal none); see /tmp/stdout.log\n```',
     )
+  })
+
+  it('preserves newlines in a multi-line engine error (e.g. an appended runbook)', () => {
+    const withRunbookError = buildScanMarkdown({
+      ...detail,
+      engineRuns: [{ ...zapApiRun, error: 'boom\nRunbook: do X' }],
+    })
+    expect(withRunbookError).toContain('```\nboom\nRunbook: do X\n```')
+    const errorLines = withRunbookError.split('\n')
+    expect(errorLines).toContain('boom')
+    expect(errorLines).toContain('Runbook: do X')
   })
 })
