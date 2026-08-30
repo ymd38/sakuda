@@ -34,7 +34,11 @@ beforeEach(() => {
 })
 
 function insertScan(
-  overrides: Partial<typeof scans.$inferInsert> & { id: string; siteId: string },
+  overrides: Partial<typeof scans.$inferInsert> & {
+    id: string
+    siteId: string
+    createdAt: string
+  },
 ) {
   db.insert(scans)
     .values({
@@ -57,8 +61,8 @@ function insertScan(
         requiresConfirmation: false,
       },
       error: null,
-      startedAt: overrides.createdAt as string,
-      finishedAt: overrides.createdAt as string,
+      startedAt: overrides.createdAt,
+      finishedAt: overrides.createdAt,
       ...overrides,
     })
     .run()
@@ -191,6 +195,46 @@ describe('reportService', () => {
       const findingB = detail2?.findings.find((f) => f.fingerprint === 'B')
       expect(findingC?.isNew).toBe(true)
       expect(findingB?.isNew).toBe(false)
+    })
+
+    it('dedupes diff.resolved by fingerprint when the previous scan reported it twice', () => {
+      const site = createSite(siteDeps, base)
+      insertScan({
+        id: 'scan-1',
+        siteId: site.id,
+        status: 'done',
+        createdAt: '2026-01-01T00:00:00Z',
+      })
+      insertEngineRun({ id: 'run-1', scanId: 'scan-1', startedAt: '2026-01-01T00:00:00Z' })
+      // Two finding rows sharing one fingerprint (e.g. two engine runs
+      // reporting the same underlying issue) — `resolved` must still count
+      // it once, matching the unique-fingerprint count in newCount/persistingCount.
+      insertFinding({
+        id: 'f-a1',
+        scanId: 'scan-1',
+        engineRunId: 'run-1',
+        fingerprint: 'A',
+        ruleId: 'rule-a',
+      })
+      insertFinding({
+        id: 'f-a2',
+        scanId: 'scan-1',
+        engineRunId: 'run-1',
+        fingerprint: 'A',
+        ruleId: 'rule-a-dup',
+      })
+
+      insertScan({
+        id: 'scan-2',
+        siteId: site.id,
+        status: 'done',
+        createdAt: '2026-01-02T00:00:00Z',
+      })
+      insertEngineRun({ id: 'run-2', scanId: 'scan-2', startedAt: '2026-01-02T00:00:00Z' })
+
+      const detail = getScanDetail(db, 'scan-2')
+      expect(detail?.diff?.resolved).toHaveLength(1)
+      expect(detail?.diff?.resolved[0]?.fingerprint).toBe('A')
     })
 
     it('orders engineRuns by startedAt and findings by severity, ruleId, url', () => {

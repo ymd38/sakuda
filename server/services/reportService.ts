@@ -70,6 +70,20 @@ function findingsForScan(db: Db, scanId: string): FindingRow[] {
   return db.select().from(findings).where(eq(findings.scanId, scanId)).all()
 }
 
+/** Keeps the first row per fingerprint so a caller counting unique
+ * fingerprints (e.g. `diffFingerprints`'s `resolved` count) gets a matching
+ * row count, even if multiple finding rows share a fingerprint. */
+function dedupeByFingerprint(rows: FindingRow[]): FindingRow[] {
+  const seen = new Set<string>()
+  const result: FindingRow[] = []
+  for (const row of rows) {
+    if (seen.has(row.fingerprint)) continue
+    seen.add(row.fingerprint)
+    result.push(row)
+  }
+  return result
+}
+
 /** Latest `done` scan of the site strictly before `before.createdAt`
  * (excluding `before.id` itself as a tie-break for equal timestamps). */
 export function previousDoneScanId(
@@ -123,9 +137,9 @@ export function getScanDetail(db: Db, scanId: string): ScanDetail | null {
     previousFingerprints = new Set(previousFindingRows.map((f) => f.fingerprint))
     const currentFingerprintSet = new Set(currentFingerprints)
     const counts = diffFingerprints(previousFingerprints, currentFingerprintSet)
-    const resolved = previousFindingRows
-      .filter((f) => !currentFingerprintSet.has(f.fingerprint))
-      .map((f) => toFindingView(f, false))
+    const resolved = dedupeByFingerprint(
+      previousFindingRows.filter((f) => !currentFingerprintSet.has(f.fingerprint)),
+    ).map((f) => toFindingView(f, false))
     diff = {
       previousScanId,
       newCount: counts.new,
