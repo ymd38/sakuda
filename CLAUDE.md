@@ -8,7 +8,7 @@ Primary: TypeScript
 - Install: `pnpm install`
 - Test: `pnpm test`
 - Lint: `pnpm run lint`
-- Typecheck: `pnpm exec tsc --noEmit`
+- Typecheck: `pnpm run typecheck`
 - Format: Prettier (hook on Write/Edit)
 
 
