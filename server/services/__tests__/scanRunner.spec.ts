@@ -1,0 +1,210 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fileURLToPath } from 'node:url'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { eq, sql } from 'drizzle-orm'
+import { openDatabase, type Db } from '../../db/client'
+import { engineRuns, findings, scans, sites } from '../../db/schema'
+import { parseEnv, type Env } from '../../config/env'
+import { createHeaderCipher } from '../../domain/headerCipher'
+import { EngineError, type EngineOutput, type EngineRunner } from '../../engines/types'
+import { logger } from '../../lib/logger'
+import { createSite, type SiteServiceDeps } from '../siteService'
+import { createScan } from '../scanService'
+import { runScan, type ScanRunnerDeps } from '../scanRunner'
+import { SiteInputSchema } from '#shared/schemas/site'
+import { emptyCounts } from '#shared/utils/severity'
+import type { Engine } from '#shared/types/api'
+
+const migrationsFolder = fileURLToPath(new URL('../../db/migrations', import.meta.url))
+const base = SiteInputSchema.parse({
+  name: 'shop',
+  frontBaseUrl: 'http://localhost:3001/',
+  nucleiPaths: '/\n/api/products',
+  openapiUrl: 'http://localhost:3001/openapi.json',
+})
+
+let db: Db
+let env: Env
+let siteDeps: SiteServiceDeps
+let n = 0
+const now = () => new Date('2026-02-01T00:00:00.000Z')
+const id = () => `id-${++n}`
+
+function successOutput(overrides: Partial<EngineOutput> = {}): EngineOutput {
+  return {
+    findings: [],
+    counts: emptyCounts(),
+    meta: {},
+    warnings: [],
+    exitCode: 0,
+    signal: null,
+    ...overrides,
+  }
+}
+
+function makeDeps(runners: Partial<Record<Engine, EngineRunner>>): ScanRunnerDeps {
+  const full: Record<Engine, EngineRunner> = {
+    nuclei: vi.fn(async () => successOutput()),
+    'zap-api': vi.fn(async () => successOutput()),
+    'zap-fe': vi.fn(async () => successOutput()),
+    ...runners,
+  }
+  return { db, env, cipher: siteDeps.cipher, runners: full, logger, now, id }
+}
+
+beforeEach(() => {
+  n = 0
+  db = openDatabase({ file: ':memory:', migrationsFolder })
+  env = parseEnv({
+    SAKUDA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+    SAKUDA_DATA_DIR: mkdtempSync(join(tmpdir(), 'sakuda-scanrunner-')),
+  })
+  siteDeps = { db, cipher: createHeaderCipher(env.encryptionKey), now, id: randomUUID }
+})
+
+describe('runScan', () => {
+  it('runs every engine, records counts/meta and findings with fingerprints', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei', 'zap-fe'])
+    const nucleiOut = successOutput({
+      counts: { critical: 1, high: 0, medium: 0, low: 0, info: 0 },
+      findings: [
+        {
+          engine: 'nuclei',
+          ruleId: 'rule-1',
+          name: 'Finding one',
+          severity: 'critical',
+          url: 'http://localhost:3001/a',
+          method: null,
+          param: null,
+          evidence: null,
+          description: null,
+          solution: null,
+          reference: null,
+          raw: {},
+        },
+      ],
+    })
+    const deps = makeDeps({ nuclei: vi.fn(async () => nucleiOut) })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const runs = db.select().from(engineRuns).where(eq(engineRuns.scanId, scan.id)).all()
+    expect(runs).toHaveLength(2)
+    const nucleiRun = runs.find((r) => r.engine === 'nuclei')
+    expect(nucleiRun?.status).toBe('done')
+    expect(nucleiRun?.counts).toEqual({ critical: 1, high: 0, medium: 0, low: 0, info: 0 })
+
+    const foundRows = db.select().from(findings).where(eq(findings.scanId, scan.id)).all()
+    expect(foundRows).toHaveLength(1)
+    expect(foundRows[0]?.fingerprint).toBe('nuclei|rule-1|http://localhost:3001/a|')
+    expect(foundRows[0]?.engineRunId).toBe(nucleiRun?.id)
+
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('done')
+    expect(scanRow?.error).toBeNull()
+    expect(scanRow?.finishedAt).not.toBeNull()
+  })
+
+  it('keeps running other engines when one fails, and records the runbook', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei', 'zap-fe'])
+    const deps = makeDeps({
+      nuclei: vi.fn(async () => {
+        throw new EngineError('boom', 'check the runbook')
+      }),
+    })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const runs = db.select().from(engineRuns).where(eq(engineRuns.scanId, scan.id)).all()
+    const nucleiRun = runs.find((r) => r.engine === 'nuclei')
+    const feRun = runs.find((r) => r.engine === 'zap-fe')
+    expect(nucleiRun?.status).toBe('failed')
+    expect(nucleiRun?.error).toBe('boom\nRunbook: check the runbook')
+    expect(feRun?.status).toBe('done')
+
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('done')
+    expect(scanRow?.error).toBe('1 engine run(s) failed')
+  })
+
+  it('marks the scan failed when every engine run fails', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei', 'zap-fe'])
+    const deps = makeDeps({
+      nuclei: vi.fn(async () => {
+        throw new Error('nuclei down')
+      }),
+      'zap-fe': vi.fn(async () => {
+        throw new Error('zap down')
+      }),
+    })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('failed')
+    expect(scanRow?.error).toBe('all 2 engine run(s) failed')
+  })
+
+  it('coerces a non-Error rejection to a string', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei'])
+    const deps = makeDeps({
+      nuclei: vi.fn(async () => {
+        throw 'raw-string-rejection'
+      }),
+    })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const run = db.select().from(engineRuns).where(eq(engineRuns.scanId, scan.id)).get()
+    expect(run?.error).toBe('raw-string-rejection')
+  })
+
+  it('fails the scan immediately with "aborted" when the signal is already aborted', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei'])
+    const deps = makeDeps({})
+    const ac = new AbortController()
+    ac.abort()
+
+    await runScan(deps, scan.id, ac.signal)
+
+    expect(deps.runners.nuclei).not.toHaveBeenCalled()
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('failed')
+    expect(scanRow?.error).toBe('aborted: server shutting down')
+    const runs = db.select().from(engineRuns).where(eq(engineRuns.scanId, scan.id)).all()
+    expect(runs).toHaveLength(0)
+  })
+
+  it('logs and returns without touching the db when the scan row is gone', async () => {
+    const deps = makeDeps({})
+    await expect(
+      runScan(deps, 'missing-scan', new AbortController().signal),
+    ).resolves.toBeUndefined()
+  })
+
+  it('fails the scan when the site was deleted before the scan started', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei'])
+    // sites -> scans is ON DELETE CASCADE, so the site is removed with FK
+    // enforcement briefly relaxed to leave the (already-created) scan row
+    // orphaned, simulating a race between deletion and the job loop.
+    db.run(sql`PRAGMA foreign_keys = OFF`)
+    db.delete(sites).where(eq(sites.id, site.id)).run()
+    db.run(sql`PRAGMA foreign_keys = ON`)
+    const deps = makeDeps({})
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('failed')
+    expect(scanRow?.error).toBe('site was deleted before the scan started')
+  })
+})

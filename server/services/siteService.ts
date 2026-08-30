@@ -4,9 +4,10 @@ import { sites } from '../db/schema'
 import type { HeaderCipher } from '../domain/headerCipher'
 import { toSitePublic } from '../domain/siteView'
 import { ServiceError } from './errors'
+import { latestScanSummary } from './scanService'
 import type { Header } from '#shared/schemas/headers'
 import type { SiteInput } from '#shared/schemas/site'
-import type { ScanSummary, SiteListItem, SitePublic } from '#shared/types/api'
+import type { SiteListItem, SitePublic } from '#shared/types/api'
 
 export { toSitePublic, toSiteSnapshot } from '../domain/siteView'
 
@@ -20,9 +21,6 @@ export interface SiteServiceDeps {
 export interface SiteWithHeaders extends SitePublic {
   headers: Header[]
 }
-
-// TODO(task-9): replace with the real `latestScanSummary` import from scanService.
-const latestScanSummary = (_db: Db, _siteId: string): ScanSummary | null => null
 
 function sealHeaders(deps: SiteServiceDeps, siteId: string, headers: Header[]) {
   if (headers.length === 0) return { headersEnc: null, headerNames: [] as string[] }
