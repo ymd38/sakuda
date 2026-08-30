@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import SiteForm from '~/components/site/SiteForm.vue'
-import type { SiteInput } from '#shared/schemas/site'
+import { SiteInputSchema, type SiteInput } from '#shared/schemas/site'
 import type { SitePublic } from '#shared/types/api'
 
 const editSite: SitePublic = {
@@ -24,12 +24,36 @@ const editSite: SitePublic = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 }
 
-function submittedPayload(wrapper: {
+/** Structural shape of what we need from a `mountSuspended` result — narrow
+ * on purpose so this file never needs `VueWrapper<any>`. */
+interface ElementWrapper {
+  find: (selector: string) => { element: Element }
+}
+
+interface EmitsSubmit {
   emitted: (name: string) => unknown[][] | undefined
-}): SiteInput {
+}
+
+function inputElement(wrapper: ElementWrapper, selector: string): HTMLInputElement {
+  const el = wrapper.find(selector).element
+  if (!(el instanceof HTMLInputElement)) throw new Error(`expected an <input> at ${selector}`)
+  return el
+}
+
+function buttonElement(wrapper: ElementWrapper, selector: string): HTMLButtonElement {
+  const el = wrapper.find(selector).element
+  if (!(el instanceof HTMLButtonElement)) throw new Error(`expected a <button> at ${selector}`)
+  return el
+}
+
+/** Validates (rather than casts) the emitted payload against the real
+ * schema, so a shape drift in SiteForm fails the test instead of silently
+ * passing through an unchecked `as SiteInput`. */
+function emittedSubmit(wrapper: EmitsSubmit): SiteInput {
   const events = wrapper.emitted('submit')
-  if (!events) throw new Error('submit was not emitted')
-  return events[0]![0] as SiteInput
+  const first = events?.[0]?.[0]
+  if (first === undefined) throw new Error('submit was not emitted')
+  return SiteInputSchema.parse(first)
 }
 
 describe('SiteForm', () => {
@@ -37,12 +61,15 @@ describe('SiteForm', () => {
     const wrapper = await mountSuspended(SiteForm, {
       props: { submitting: false, errorMessage: null },
     })
-    expect(
-      (wrapper.find('[data-testid="nuclei-rate-limit"]').element as HTMLInputElement).value,
-    ).toBe('50')
-    expect(
-      (wrapper.find('[data-testid="zap-fe-seed-path"]').element as HTMLInputElement).value,
-    ).toBe('/')
+    expect(inputElement(wrapper, '[data-testid="nuclei-rate-limit"]').value).toBe('50')
+    expect(inputElement(wrapper, '[data-testid="zap-fe-seed-path"]').value).toBe('/')
+  })
+
+  it('shows no confirmation checkbox on a fresh, blank form', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    expect(wrapper.find('[data-testid="non-local-confirm"]').exists()).toBe(false)
   })
 
   it('reveals the non-local confirmation for a non-local frontBaseUrl and blocks submit until checked', async () => {
@@ -53,11 +80,11 @@ describe('SiteForm', () => {
 
     const confirm = wrapper.find('[data-testid="non-local-confirm"]')
     expect(confirm.exists()).toBe(true)
-    const submit = wrapper.find('[data-testid="submit"]')
-    expect((submit.element as HTMLButtonElement).disabled).toBe(true)
+    const submit = buttonElement(wrapper, '[data-testid="submit"]')
+    expect(submit.disabled).toBe(true)
 
     await confirm.setValue(true)
-    expect((submit.element as HTMLButtonElement).disabled).toBe(false)
+    expect(submit.disabled).toBe(false)
   })
 
   it('hides the non-local confirmation for a local frontBaseUrl', async () => {
@@ -76,7 +103,7 @@ describe('SiteForm', () => {
     await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
     await wrapper.find('[data-testid="site-form"]').trigger('submit')
 
-    const payload = submittedPayload(wrapper)
+    const payload = emittedSubmit(wrapper)
     expect(payload.name).toBe('Example')
     expect(payload.apiBaseUrl).toBeNull()
     expect(payload.openapiUrl).toBeNull()
@@ -86,6 +113,23 @@ describe('SiteForm', () => {
     expect(payload.headers).toEqual([])
   })
 
+  it('falls back to the schema defaults when a numeric field is cleared', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    await wrapper.find('[data-testid="name"]').setValue('Example')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
+    await wrapper.find('[data-testid="nuclei-rate-limit"]').setValue('')
+    await wrapper.find('[data-testid="zap-api-max-minutes"]').setValue('')
+    await wrapper.find('[data-testid="zap-fe-spider-max-minutes"]').setValue('')
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+
+    const payload = emittedSubmit(wrapper)
+    expect(payload.nucleiRateLimit).toBe(50)
+    expect(payload.zapApiMaxMinutes).toBe(45)
+    expect(payload.zapFeSpiderMaxMinutes).toBe(5)
+  })
+
   it('renders header value inputs as password fields that are never prefilled', async () => {
     const wrapper = await mountSuspended(SiteForm, {
       props: { submitting: false, errorMessage: null },
@@ -93,7 +137,21 @@ describe('SiteForm', () => {
     await wrapper.find('[data-testid="add-header"]').trigger('click')
     const value = wrapper.find('[data-testid="header-value-0"]')
     expect(value.attributes('type')).toBe('password')
-    expect((value.element as HTMLInputElement).value).toBe('')
+    expect(inputElement(wrapper, '[data-testid="header-value-0"]').value).toBe('')
+  })
+
+  it('drops a header row that has a name but no value', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    await wrapper.find('[data-testid="name"]').setValue('Example')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
+    await wrapper.find('[data-testid="add-header"]').trigger('click')
+    await wrapper.find('[data-testid="header-name-0"]').setValue('Authorization')
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+
+    const payload = emittedSubmit(wrapper)
+    expect(payload.headers).toEqual([])
   })
 
   it('lists existing header names in edit mode and hides the editor until Replace headers is clicked', async () => {
@@ -109,7 +167,7 @@ describe('SiteForm', () => {
     expect(wrapper.find('[data-testid="headers-editor"]').exists()).toBe(true)
 
     await wrapper.find('[data-testid="site-form"]').trigger('submit')
-    const payload = submittedPayload(wrapper)
+    const payload = emittedSubmit(wrapper)
     expect(payload.headers).toEqual([])
   })
 
@@ -127,8 +185,6 @@ describe('SiteForm', () => {
     const wrapper = await mountSuspended(SiteForm, {
       props: { submitting: true, errorMessage: null },
     })
-    expect((wrapper.find('[data-testid="submit"]').element as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    expect(buttonElement(wrapper, '[data-testid="submit"]').disabled).toBe(true)
   })
 })

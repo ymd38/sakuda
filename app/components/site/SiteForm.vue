@@ -29,10 +29,15 @@ const form = reactive({
   nonLocalConfirmed: props.initial?.nonLocalConfirmed ?? false,
 })
 
-// `shared/utils/localHost.ts` — auto-imported from `shared/utils/*`.
-const requiresConfirmation = computed(() =>
-  siteRequiresConfirmation(form.frontBaseUrl, form.apiBaseUrl || null),
-)
+// `shared/utils/localHost.ts` — auto-imported from `shared/utils/*`. A blank
+// or unparsable frontBaseUrl must not show the confirmation gate on a fresh
+// form — `siteRequiresConfirmation('', ...)` would otherwise report `true`
+// because an unparsable URL is treated as "not local".
+const requiresConfirmation = computed(() => {
+  const front = form.frontBaseUrl.trim()
+  if (front === '' || !URL.canParse(front)) return false
+  return siteRequiresConfirmation(form.frontBaseUrl, form.apiBaseUrl || null)
+})
 
 // Headers are write-only: the API never returns values, only `headerNames`.
 // In edit mode the editor starts hidden — submitting without touching it
@@ -56,8 +61,12 @@ function emptyToNull(value: string): string | null {
   return value.trim() === '' ? null : value
 }
 
-function hasContent(row: { name: string; value: string }): boolean {
-  return row.name.trim() !== '' || row.value.trim() !== ''
+// A header row is only sendable once both fields are filled — a row with
+// just a name (or just a value) is dropped rather than submitted, since
+// `HeaderSchema` requires both and the server-side error would be confusing
+// for a row the user hasn't finished typing yet.
+function isCompleteHeader(row: { name: string; value: string }): boolean {
+  return row.name.trim() !== '' && row.value.trim() !== ''
 }
 
 function toHeader(row: { name: string; value: string }): Header {
@@ -67,6 +76,14 @@ function toHeader(row: { name: string; value: string }): Header {
 const canSubmit = computed(
   () => !props.submitting && (!requiresConfirmation.value || form.nonLocalConfirmed),
 )
+
+// `v-model.number` leaves the bound field as the raw string when the input
+// is empty or unparsable (Vue's `looseToNumber` gives up on non-numeric
+// text) — fall back to the schema default rather than submitting a string
+// or a non-finite number.
+function toFiniteNumber(value: number | string, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
 
 function buildPayload(): SiteInput {
   const base = {
@@ -78,13 +95,13 @@ function buildPayload(): SiteInput {
     openapiJson: emptyToNull(form.openapiJson),
     zapFeSeedPath: form.zapFeSeedPath,
     excludePaths: form.excludePaths,
-    nucleiRateLimit: form.nucleiRateLimit,
-    zapApiMaxMinutes: form.zapApiMaxMinutes,
-    zapFeSpiderMaxMinutes: form.zapFeSpiderMaxMinutes,
+    nucleiRateLimit: toFiniteNumber(form.nucleiRateLimit, 50),
+    zapApiMaxMinutes: toFiniteNumber(form.zapApiMaxMinutes, 45),
+    zapFeSpiderMaxMinutes: toFiniteNumber(form.zapFeSpiderMaxMinutes, 5),
     nonLocalConfirmed: form.nonLocalConfirmed,
   }
   if (!headersEditable.value) return base
-  return { ...base, headers: headerRows.filter(hasContent).map(toHeader) }
+  return { ...base, headers: headerRows.filter(isCompleteHeader).map(toHeader) }
 }
 
 function handleSubmit() {
@@ -216,6 +233,7 @@ function handleSubmit() {
           v-model.number="form.nucleiRateLimit"
           data-testid="nuclei-rate-limit"
           type="number"
+          required
           min="1"
           max="1000"
           class="input-pill"
@@ -230,6 +248,7 @@ function handleSubmit() {
           v-model.number="form.zapApiMaxMinutes"
           data-testid="zap-api-max-minutes"
           type="number"
+          required
           min="1"
           max="600"
           class="input-pill"
@@ -244,6 +263,7 @@ function handleSubmit() {
           v-model.number="form.zapFeSpiderMaxMinutes"
           data-testid="zap-fe-spider-max-minutes"
           type="number"
+          required
           min="1"
           max="120"
           class="input-pill"
