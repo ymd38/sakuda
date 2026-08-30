@@ -34,6 +34,9 @@ export interface CommandResult {
 
 export class SpawnError extends Error {}
 
+/** Thrown when capturing stdout/stderr to disk fails (e.g. disk full, permission denied). */
+export class OutputStreamError extends Error {}
+
 /**
  * Spawns `cmd` with `args` (never through a shell), captures stdout/stderr to
  * files (never buffered in memory — avoids the 1MB maxBuffer limit of
@@ -61,11 +64,26 @@ export async function runCommand(opts: RunCommandOptions): Promise<CommandResult
   const err = createWriteStream(opts.stderrPath)
   child.stdout.pipe(out)
   child.stderr.pipe(err)
+
+  // Captured, never discarded: a write failure (disk full, permission
+  // denied) must surface as OutputStreamError below, not as a normal-looking
+  // result with silently truncated output files.
+  let streamError: Error | undefined
+  const recordStreamError =
+    (stream: 'stdout' | 'stderr') =>
+    (e: Error): void => {
+      streamError ??= e
+      logger.error({ label, stream, err: e }, 'output stream failed')
+    }
   // Registered now, not after awaiting exit: pipe() can already have ended
   // and finished these streams by the time the child's 'close' event fires,
   // so a listener attached later would miss the event and hang forever.
-  const outFinished = once(out, 'finish').catch(() => undefined)
-  const errFinished = once(err, 'finish').catch(() => undefined)
+  // `once()` special-cases 'error': it rejects if the stream errors before
+  // 'finish', which is exactly the failure this is meant to catch — the
+  // `.catch` below only prevents an unhandled rejection while we still hold
+  // the raw promise; it does not discard the error.
+  const outFinished = once(out, 'finish').catch(recordStreamError('stdout'))
+  const errFinished = once(err, 'finish').catch(recordStreamError('stderr'))
 
   let timedOut = false
   let aborted = false
@@ -112,11 +130,26 @@ export async function runCommand(opts: RunCommandOptions): Promise<CommandResult
     },
   )
 
+  const clearWatchers = (): void => {
+    clearTimeout(timer)
+    opts.signal?.removeEventListener('abort', onAbort)
+  }
+  // Cleared as soon as the child actually exits (resolve or reject), not
+  // after also waiting on the output streams below — otherwise a child that
+  // exits promptly but whose output is still flushing to disk can let the
+  // timeout timer fire afterwards and mark a clean run as `timedOut: true`.
+  // The `finally` below is kept as a safety net (idempotent: clearing an
+  // already-cleared timer / removing an already-removed listener is a no-op).
+  void exit.then(clearWatchers, clearWatchers)
+
   try {
     const { code, signal } = await exit
-    // pipe() ends the writables when the child streams end; the catch only
-    // guards a stream destroyed after a spawn error (never reaches 'finish').
     await Promise.all([outFinished, errFinished])
+    if (streamError) {
+      throw new OutputStreamError(`${label}: failed to capture process output`, {
+        cause: streamError,
+      })
+    }
     const oomKilled = signal === 'SIGKILL' || code === 137
     const result: CommandResult = {
       code,
@@ -129,7 +162,6 @@ export async function runCommand(opts: RunCommandOptions): Promise<CommandResult
     logger.info({ label, ...result }, 'process exited')
     return result
   } finally {
-    clearTimeout(timer)
-    opts.signal?.removeEventListener('abort', onAbort)
+    clearWatchers()
   }
 }

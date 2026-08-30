@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { runCommand, SpawnError } from '../runCommand'
+import { OutputStreamError, runCommand, SpawnError } from '../runCommand'
 
 describe('runCommand', () => {
   let tmp: string
@@ -92,4 +92,29 @@ describe('runCommand', () => {
     })
     expect(readFileSync(base.stdoutPath, 'utf8')).toBe('$HOME;`id`')
   }, 10_000)
+
+  it('rejects with OutputStreamError when the output stream fails, after the child exits', async () => {
+    // Awaiting the promise here already proves the child exited: runCommand
+    // only reaches the OutputStreamError throw after `await exit` (the
+    // child's 'close' event) has resolved — structurally, not by inference.
+    const brokenStdoutPath = join(tmp, 'missing-dir', 'stdout.log')
+    await expect(
+      runCommand({
+        ...base,
+        stdoutPath: brokenStdoutPath,
+        args: ['-e', 'process.exitCode = 0'],
+        timeoutMs: 5000,
+      }),
+    ).rejects.toThrow(OutputStreamError)
+  }, 10_000)
+
+  it('does not report timedOut for a fast exit while output is still flushing', async () => {
+    const r = await runCommand({
+      ...base,
+      args: ['-e', "process.stdout.write('x'.repeat(2*1024*1024)); process.exitCode = 0"],
+      timeoutMs: 10_000,
+    })
+    expect(r.timedOut).toBe(false)
+    expect(r.code).toBe(0)
+  }, 15_000)
 })
