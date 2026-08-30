@@ -99,6 +99,13 @@ describe('normalizeZapReport', () => {
     })
   })
 
+  it('builds the medium finding from the auth-failure instance (empty param, 401 evidence)', () => {
+    const medium = result.findings.find((f) => f.severity === 'medium')!
+    expect(medium.severity).toBe('medium')
+    expect(medium.param).toBeNull()
+    expect(medium.evidence).toBe('401 Unauthorized')
+  })
+
   it('does not emit a finding for the info-level alert (not a reported severity)', () => {
     expect(result.findings.some((f) => f.severity === 'info')).toBe(false)
   })

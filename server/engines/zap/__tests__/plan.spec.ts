@@ -136,6 +136,7 @@ describe('buildZapApiPlan', () => {
       reportDir: '/zap/wrk/',
     })
 
+    // as: buildZapApiPlan returns Record<string, unknown>; narrow jobs shape for this assertion only
     const openapiJob = plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>
     expect(openapiJob[1]).toEqual({
       type: 'openapi',
