@@ -66,6 +66,8 @@ export function parseNucleiStats(logText: string): NucleiStats | null {
     .reverse()) {
     try {
       const j: unknown = JSON.parse(c)
+      // as: shape guarded by the 'requests' in j check above; every NucleiStats field is an
+      // optional string, so a partial/malformed object still satisfies the type at runtime.
       if (typeof j === 'object' && j && 'requests' in j) return j as NucleiStats
     } catch {
       /* not a stats line */
@@ -82,9 +84,11 @@ export function normalizeNucleiLines(
   const findings: NewFinding[] = []
   for (const l of lines) {
     const sev = l.info.severity.toLowerCase()
-    const level: SeverityLevel = (SEVERITY_LEVELS as readonly string[]).includes(sev)
-      ? (sev as SeverityLevel)
-      : 'info'
+    // as: SEVERITY_LEVELS is typed as readonly SeverityLevel[]; widen to string[] so
+    // .includes() can check an arbitrary lowercased severity string against it.
+    const isKnownLevel = (SEVERITY_LEVELS as readonly string[]).includes(sev)
+    // as: narrowed by the includes() check above — sev is one of SEVERITY_LEVELS when true.
+    const level: SeverityLevel = isKnownLevel ? (sev as SeverityLevel) : 'info'
     counts[level]++
     if (!isReportedSeverity(level)) continue
     const url = unalias(l['matched-at'] ?? l.host ?? '')

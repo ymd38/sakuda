@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
@@ -148,5 +148,27 @@ describe('runNuclei', () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(EngineError)
+  })
+
+  it('throws EngineError with no target URLs, before spawning the binary', async () => {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    await expect(
+      runNuclei({
+        scanId: 'scan-3',
+        engine: 'nuclei',
+        site: baseSite({ nucleiPaths: '' }),
+        workDir,
+        env,
+        logger,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/no target URLs/)
+    expect(existsSync(join(workDir, 'targets.txt'))).toBe(false)
   })
 })

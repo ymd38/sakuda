@@ -66,6 +66,24 @@ describe('normalizeNucleiLines', () => {
     expect(f.raw.request).toBe('GET /ftp HTTP/1.1\r\nHost: host.docker.internal:3001\r\n')
   })
 
+  it('falls back to host when matched-at is absent', () => {
+    const line = JSON.stringify({
+      'template-id': 't1',
+      info: { name: 'n', severity: 'high' },
+      host: 'host.docker.internal:3001',
+    })
+    const { lines } = parseNucleiJsonl(line)
+    const { findings } = normalizeNucleiLines(lines, unalias)
+    expect(findings[0]!.url).toBe('localhost:3001')
+  })
+
+  it('is an empty url when neither matched-at nor host is present', () => {
+    const line = JSON.stringify({ 'template-id': 't1', info: { name: 'n', severity: 'high' } })
+    const { lines } = parseNucleiJsonl(line)
+    const { findings } = normalizeNucleiLines(lines, unalias)
+    expect(findings[0]!.url).toBe('')
+  })
+
   it('truncates raw.request/response to 4000 chars', () => {
     const long = 'x'.repeat(5000)
     const line = JSON.stringify({
