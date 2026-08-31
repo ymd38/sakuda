@@ -11,7 +11,7 @@ JUICESHOP_PORT ?= 4001
 COMPOSE        ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help env keygen build up down restart logs ps open juice-up juice-down \
+.PHONY: help env keygen build up down sakuda-up sakuda-down restart logs ps open juice-up juice-down \
         dev test e2e lint typecheck check clean reset-data
 
 help: ## Show this help
@@ -41,8 +41,15 @@ up: ## Start sakuda in the background (http://localhost:SAKUDA_PORT)
 	$(COMPOSE) up -d sakuda
 	@echo "sakuda: http://localhost:$(SAKUDA_PORT)"
 
-down: ## Stop and remove the containers (data volume is kept)
+down: ## Stop and remove ALL containers incl. Juice Shop (data volume is kept; Juice Shop resets its DB on restart)
 	$(COMPOSE) --profile dryrun down
+
+sakuda-up: ## Start only sakuda (same as `up`; Juice Shop untouched)
+	$(COMPOSE) up -d sakuda
+	@echo "sakuda: http://localhost:$(SAKUDA_PORT)"
+
+sakuda-down: ## Stop and remove only the sakuda container — Juice Shop keeps running (and keeps its accounts)
+	$(COMPOSE) rm -sf sakuda
 
 restart: ## Restart sakuda
 	$(COMPOSE) restart sakuda

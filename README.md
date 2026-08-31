@@ -23,7 +23,9 @@ read from `.env`.
 make env      # .env from .env.example with a fresh SAKUDA_ENCRYPTION_KEY
 make build    # build the image (10–20 min the first time)
 make up       # start → http://localhost:3001
-make logs     # follow logs · make down · make restart · make ps
+make logs     # follow logs · make restart · make ps
+make sakuda-down && make sakuda-up   # recreate only sakuda (e.g. after make build) — Juice Shop keeps running
+make down     # stops everything incl. Juice Shop, which resets its accounts on the next start
 ```
 
 `make help` lists every target. Without make:
