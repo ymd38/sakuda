@@ -25,6 +25,10 @@ export interface ZapRunInput {
   /** Non-secret files to drop into `workDir` before the run (e.g. a script
    * the plan references). Keys are file names relative to `workDir`. */
   extraFiles?: Record<string, string>
+  /** Files that carry secret values (e.g. the browser-storage Selenium
+   * script): written 0600 next to `replacer.conf` and removed in `finally`
+   * no matter how the run ends. */
+  secretFiles?: Record<string, string>
   /** File (relative to `workDir`) to read back after the run; defaults to the JSON report. */
   reportFile?: string
   timeoutMs: number
@@ -60,6 +64,8 @@ export async function runZap(i: ZapRunInput): Promise<ZapRunOutput> {
     await writeFile(planFile, i.planYaml)
     for (const [name, content] of Object.entries(i.extraFiles ?? {}))
       await writeFile(join(i.workDir, name), content)
+    for (const [name, content] of Object.entries(i.secretFiles ?? {}))
+      await writeFile(join(i.workDir, name), content, { mode: 0o600 })
     const args = ['-dir', zapPath(i.env, i.workDir, 'zaphome'), '-cmd']
     if (i.replacerConf !== null) {
       // Header values must never be readable by anyone but this process: 0600,
@@ -94,6 +100,8 @@ export async function runZap(i: ZapRunInput): Promise<ZapRunOutput> {
     // which independently persists the same replacer values (see comment
     // above) if left in place.
     await rm(confFile, { force: true })
+    for (const name of Object.keys(i.secretFiles ?? {}))
+      await rm(join(i.workDir, name), { force: true })
     await rm(zapHomeDir, { recursive: true, force: true })
   }
 }

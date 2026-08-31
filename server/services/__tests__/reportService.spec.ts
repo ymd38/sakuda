@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { eq, sql } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
 import { engineRuns, findings, scans, sites } from '../../db/schema'
-import { createHeaderCipher } from '../../domain/headerCipher'
+import { createSiteCipher } from '../../domain/headerCipher'
 import { createSite, type SiteServiceDeps } from '../siteService'
 import { getScanDetail, getSiteHistory, previousDoneScanId } from '../reportService'
 import { SiteInputSchema } from '#shared/schemas/site'
@@ -27,7 +27,7 @@ beforeEach(() => {
   db = openDatabase({ file: ':memory:', migrationsFolder })
   siteDeps = {
     db,
-    cipher: createHeaderCipher(randomBytes(32).toString('base64')),
+    cipher: createSiteCipher(randomBytes(32).toString('base64')),
     now: () => new Date('2026-01-01T00:00:00Z'),
     id: () => `site-${++n}`,
   }
@@ -52,12 +52,14 @@ function insertScan(
         openapiUrl: 'http://localhost:3001/openapi.json',
         hasOpenapiJson: false,
         zapFeSeedPath: '/',
+        discoverySeedPaths: '',
         excludePaths: '',
         nucleiRateLimit: 50,
         zapApiMaxMinutes: 45,
         zapFeSpiderMaxMinutes: 5,
         nonLocalConfirmed: false,
         headerNames: [],
+        browserStorageNames: [],
         requiresConfirmation: false,
       },
       error: null,

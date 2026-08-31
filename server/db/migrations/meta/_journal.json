@@ -15,6 +15,13 @@
       "when": 1788155930750,
       "tag": "0001_discoveries",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788159053900,
+      "tag": "0002_browser_storage_seeds",
+      "breakpoints": true
     }
   ]
 }

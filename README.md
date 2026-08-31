@@ -156,6 +156,22 @@ site (`/path` or `api:/path`, relative to the base URLs). On the site page:
 3. Start a scan. Nuclei uses the saved list; ZAP frontend still crawls from
    the seed path itself.
 
+**Single-page apps behind a login.** Header injection authenticates the
+_requests_, but an SPA decides whether it is logged in from what it finds in
+`localStorage` / `sessionStorage` / cookies — so with headers alone ZAP's
+browser renders the anonymous UI and never reaches the basket, profile, …
+pages or the APIs behind them. Register those values as **Browser storage**
+on the site (kind + name + value; stored encrypted like headers, write-only
+in the API) and sakuda seeds them into ZAP's browser before every Ajax
+spider run (discovery and ZAP frontend) via a Selenium `browserLaunched`
+script that is written 0600 for the run and deleted afterwards. For OWASP
+Juice Shop that is `localStorage token = <JWT>` plus `sessionStorage bid =
+<basket id>` from `POST /rest/user/login`.
+
+**Discovery seeds.** _Discovery seed paths_ (one per line, hash routes such
+as `/#/search?q=apple` are fine) start one Ajax spider each; empty falls
+back to the ZAP frontend seed path.
+
 A site runs one job at a time: a discovery is refused while a scan is
 queued/running and vice versa. Discovery artifacts (ZAP plan, logs, the
 site-tree dump) live under `<data dir>/discoveries/<id>` and are removed with

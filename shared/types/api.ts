@@ -1,3 +1,5 @@
+import type { BrowserStorageName } from '../schemas/browserStorage'
+
 export type Engine = 'nuclei' | 'zap-api' | 'zap-fe'
 export type Severity = 'critical' | 'high' | 'medium'
 export type SeverityLevel = Severity | 'low' | 'info'
@@ -19,12 +21,15 @@ export interface SitePublic {
   openapiUrl: string | null
   openapiJson: string | null
   zapFeSeedPath: string
+  discoverySeedPaths: string
   excludePaths: string
   nucleiRateLimit: number
   zapApiMaxMinutes: number
   zapFeSpiderMaxMinutes: number
   nonLocalConfirmed: boolean
   headerNames: string[]
+  /** kind + name of each injected browser-storage item; values are write-only. */
+  browserStorageNames: BrowserStorageName[]
   requiresConfirmation: boolean
   createdAt: string
   updatedAt: string

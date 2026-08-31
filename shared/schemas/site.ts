@@ -1,7 +1,9 @@
 import { z } from 'zod'
+import { BrowserStorageSchema } from './browserStorage'
 import { HeadersSchema } from './headers'
 import { siteRequiresConfirmation } from '../utils/localHost'
 import { parseNucleiPathLines } from '../utils/nucleiPaths'
+import { parseSeedPathLines } from '../utils/seedPaths'
 
 /** Upper bound of the saved target list; `addSiteTargets` enforces the same
  * limit so a discovery save can never leave the site un-editable through
@@ -26,17 +28,23 @@ export const SiteInputSchema = z
       .string()
       .regex(/^\/\S*$/, 'must start with "/"')
       .default('/'),
+    /** Discovery crawl seeds, one path per line; empty → `zapFeSeedPath`. */
+    discoverySeedPaths: z.string().max(5_000).default(''),
     excludePaths: z.string().max(5_000).default(''),
     nucleiRateLimit: z.number().int().min(1).max(1000).default(50),
     zapApiMaxMinutes: z.number().int().min(1).max(600).default(45),
     zapFeSpiderMaxMinutes: z.number().int().min(1).max(120).default(5),
     nonLocalConfirmed: z.boolean().default(false),
     headers: HeadersSchema.optional(),
+    /** Injected into ZAP's browser before the Ajax spider runs (SPA login state). */
+    browserStorage: BrowserStorageSchema.optional(),
   })
   .superRefine((v, ctx) => {
     const parsed = parseNucleiPathLines(v.nucleiPaths)
     for (const e of parsed.errors)
       ctx.addIssue({ code: 'custom', path: ['nucleiPaths'], message: e })
+    for (const e of parseSeedPathLines(v.discoverySeedPaths).errors)
+      ctx.addIssue({ code: 'custom', path: ['discoverySeedPaths'], message: e })
     if (!v.apiBaseUrl && parsed.lines.some((l) => l.base === 'api')) {
       ctx.addIssue({
         code: 'custom',

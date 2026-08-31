@@ -8,7 +8,7 @@ import pino from 'pino'
 import { eq } from 'drizzle-orm'
 import { openDatabase } from '../../db/client'
 import { scans } from '../../db/schema'
-import { createHeaderCipher } from '../../domain/headerCipher'
+import { createSiteCipher } from '../../domain/headerCipher'
 import { createScan } from '../scanService'
 import { ServiceError } from '../errors'
 import { createDiscovery } from '../discoveryService'
@@ -36,7 +36,7 @@ let n = 0
 beforeEach(() => {
   deps = {
     db: openDatabase({ file: ':memory:', migrationsFolder }),
-    cipher: createHeaderCipher(randomBytes(32).toString('base64')),
+    cipher: createSiteCipher(randomBytes(32).toString('base64')),
     now: () => new Date('2026-01-01T00:00:00Z'),
     id: () => `id-${++n}`,
   }
@@ -58,6 +58,25 @@ describe('siteService', () => {
     expect(updateSite(deps, s.id, { ...base, name: 'renamed' }).headerNames).toEqual(['Cookie'])
     expect(updateSite(deps, s.id, { ...base, headers: [] }).headerNames).toEqual([])
     expect(loadSiteWithHeaders(deps, s.id)?.headers).toEqual([])
+  })
+
+  it('seals browser storage like headers: names exposed, values write-only, [] clears', () => {
+    const storage = [
+      { kind: 'localStorage' as const, name: 'token', value: 'eyJ.secret' },
+      { kind: 'sessionStorage' as const, name: 'bid', value: '6' },
+    ]
+    const s = createSite(deps, { ...base, browserStorage: storage })
+    expect(s.browserStorageNames).toEqual([
+      { kind: 'localStorage', name: 'token' },
+      { kind: 'sessionStorage', name: 'bid' },
+    ])
+    expect(JSON.stringify(s)).not.toContain('eyJ.secret')
+    expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual(storage)
+    // omitted → kept; [] → cleared
+    expect(updateSite(deps, s.id, { ...base, name: 'renamed' }).browserStorageNames).toHaveLength(2)
+    expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual(storage)
+    expect(updateSite(deps, s.id, { ...base, browserStorage: [] }).browserStorageNames).toEqual([])
+    expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual([])
   })
 
   it('lists with lastScan null, gets, deletes', async () => {

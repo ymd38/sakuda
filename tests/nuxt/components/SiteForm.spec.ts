@@ -14,12 +14,14 @@ const editSite: SitePublic = {
   openapiUrl: null,
   openapiJson: null,
   zapFeSeedPath: '/',
+  discoverySeedPaths: '',
   excludePaths: '',
   nucleiRateLimit: 50,
   zapApiMaxMinutes: 45,
   zapFeSpiderMaxMinutes: 5,
   nonLocalConfirmed: true,
   headerNames: ['Authorization', 'X-Api-Key'],
+  browserStorageNames: [],
   requiresConfirmation: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
@@ -170,4 +172,60 @@ describe('SiteForm', () => {
     })
     expect(buttonElement(wrapper, '[data-testid="submit"]').disabled).toBe(true)
   })
+
+  it('submits discovery seed paths and complete browser-storage rows; values are password inputs', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    await wrapper.find('[data-testid="name"]').setValue('Shop')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:4001')
+    await wrapper.find('[data-testid="discovery-seed-paths"]').setValue('/#/\n/#/basket')
+
+    await wrapper.find('[data-testid="add-storage"]').trigger('click')
+    await wrapper.find('[data-testid="add-storage"]').trigger('click')
+    expect(inputElement(wrapper, '[data-testid="storage-value-0"]').type).toBe('password')
+    expect(inputElement(wrapper, '[data-testid="storage-value-0"]').value).toBe('')
+    await wrapper.find('[data-testid="storage-kind-0"]').setValue('sessionStorage')
+    await wrapper.find('[data-testid="storage-name-0"]').setValue('bid')
+    await wrapper.find('[data-testid="storage-value-0"]').setValue('6')
+    // second row left without a value → dropped, not submitted half-filled
+    await wrapper.find('[data-testid="storage-name-1"]').setValue('token')
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+
+    const payload = emittedSubmit(wrapper)
+    expect(payload.discoverySeedPaths).toBe('/#/\n/#/basket')
+    expect(payload.browserStorage).toEqual([{ kind: 'sessionStorage', name: 'bid', value: '6' }])
+  })
+
+  it('lists existing browser-storage names in edit mode and omits browserStorage until Replace is clicked', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: {
+        initial: {
+          ...editSite,
+          browserStorageNames: [{ kind: 'localStorage', name: 'token' }],
+        },
+        submitting: false,
+        errorMessage: null,
+      },
+    })
+    expect(wrapper.findAll('[data-testid="storage-chip"]').map((c) => c.text())).toEqual([
+      'localStorage:token',
+    ])
+    expect(wrapper.find('[data-testid="storage-editor"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+    expect(emittedSubmit(wrapper).browserStorage).toBeUndefined()
+
+    await wrapper.find('[data-testid="replace-storage"]').trigger('click')
+    expect(wrapper.find('[data-testid="storage-editor"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+    expect(emittedSubmit2(wrapper).browserStorage).toEqual([])
+  })
 })
+
+/** Second emitted submit (the first is consumed by `emittedSubmit`). */
+function emittedSubmit2(wrapper: EmitsSubmit): SiteInput {
+  const events = wrapper.emitted('submit')
+  const second = events?.[1]?.[0]
+  if (second === undefined) throw new Error('second submit was not emitted')
+  return SiteInputSchema.parse(second)
+}

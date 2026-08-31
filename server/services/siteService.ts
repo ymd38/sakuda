@@ -3,12 +3,13 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Db } from '../db/client'
 import { discoveries, scans, sites } from '../db/schema'
-import type { HeaderCipher } from '../domain/headerCipher'
+import type { SiteCipher } from '../domain/headerCipher'
 import { toSitePublic } from '../domain/siteView'
 import { mergeTargetLines } from '#shared/utils/targetLines'
 import type { Logger } from '../lib/logger'
 import { ServiceError } from './errors'
 import { latestScanSummary } from './scanService'
+import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
 import type { Header } from '#shared/schemas/headers'
 import { NUCLEI_PATHS_MAX_CHARS, type SiteInput } from '#shared/schemas/site'
 import type { AddTargetsResult, SiteListItem, SitePublic } from '#shared/types/api'
@@ -17,18 +18,32 @@ export { toSitePublic, toSiteSnapshot } from '../domain/siteView'
 
 export interface SiteServiceDeps {
   db: Db
-  cipher: HeaderCipher
+  cipher: SiteCipher
   now: () => Date
   id: () => string
 }
 
+/** A site with its decrypted secrets — only ever built inside the job
+ * runners, never returned by the API. */
 export interface SiteWithHeaders extends SitePublic {
   headers: Header[]
+  browserStorage: BrowserStorageItem[]
 }
 
 function sealHeaders(deps: SiteServiceDeps, siteId: string, headers: Header[]) {
   if (headers.length === 0) return { headersEnc: null, headerNames: [] as string[] }
-  return { headersEnc: deps.cipher.seal(headers, siteId), headerNames: headers.map((h) => h.name) }
+  return {
+    headersEnc: deps.cipher.headers.seal(headers, siteId),
+    headerNames: headers.map((h) => h.name),
+  }
+}
+
+function sealBrowserStorage(deps: SiteServiceDeps, siteId: string, items: BrowserStorageItem[]) {
+  if (items.length === 0) return { browserStorageEnc: null, browserStorageNames: [] }
+  return {
+    browserStorageEnc: deps.cipher.browserStorage.seal(items, siteId),
+    browserStorageNames: items.map((i) => ({ kind: i.kind, name: i.name })),
+  }
 }
 
 function getSiteOrThrow(db: Db, id: string): SitePublic {
@@ -45,10 +60,17 @@ export function getSite(db: Db, id: string): SitePublic | null {
 export function createSite(deps: SiteServiceDeps, input: SiteInput): SitePublic {
   const id = deps.id()
   const now = deps.now().toISOString()
-  const { headers = [], ...fields } = input
+  const { headers = [], browserStorage = [], ...fields } = input
   deps.db
     .insert(sites)
-    .values({ id, ...fields, ...sealHeaders(deps, id, headers), createdAt: now, updatedAt: now })
+    .values({
+      id,
+      ...fields,
+      ...sealHeaders(deps, id, headers),
+      ...sealBrowserStorage(deps, id, browserStorage),
+      createdAt: now,
+      updatedAt: now,
+    })
     .run()
   return getSiteOrThrow(deps.db, id)
 }
@@ -56,11 +78,14 @@ export function createSite(deps: SiteServiceDeps, input: SiteInput): SitePublic 
 export function updateSite(deps: SiteServiceDeps, id: string, input: SiteInput): SitePublic {
   const existing = deps.db.select().from(sites).where(eq(sites.id, id)).get()
   if (!existing) throw new ServiceError(404, 'SITE_NOT_FOUND', `site ${id} not found`)
-  const { headers, ...fields } = input
+  // Secrets are write-only: omitting the field keeps the stored set, [] clears it.
+  const { headers, browserStorage, ...fields } = input
   const sealed = headers === undefined ? {} : sealHeaders(deps, id, headers)
+  const sealedStorage =
+    browserStorage === undefined ? {} : sealBrowserStorage(deps, id, browserStorage)
   deps.db
     .update(sites)
-    .set({ ...fields, ...sealed, updatedAt: deps.now().toISOString() })
+    .set({ ...fields, ...sealed, ...sealedStorage, updatedAt: deps.now().toISOString() })
     .where(eq(sites.id, id))
     .run()
   return getSiteOrThrow(deps.db, id)
@@ -172,6 +197,9 @@ export function loadSiteWithHeaders(deps: SiteServiceDeps, id: string): SiteWith
   if (!row) return null
   return {
     ...toSitePublic(row),
-    headers: row.headersEnc ? deps.cipher.open(row.headersEnc, id) : [],
+    headers: row.headersEnc ? deps.cipher.headers.open(row.headersEnc, id) : [],
+    browserStorage: row.browserStorageEnc
+      ? deps.cipher.browserStorage.open(row.browserStorageEnc, id)
+      : [],
   }
 }

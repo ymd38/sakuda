@@ -20,6 +20,7 @@ describe('SiteInputSchema', () => {
       openapiUrl: null,
       openapiJson: null,
       zapFeSeedPath: '/',
+      discoverySeedPaths: '',
       excludePaths: '',
       nucleiRateLimit: 50,
       zapApiMaxMinutes: 45,
@@ -112,5 +113,40 @@ describe('SiteInputSchema', () => {
   it('requires zapFeSeedPath to start with "/"', () => {
     const issues = issuesFor({ ...minimal, zapFeSeedPath: 'no-slash' })
     expect(issues.some((i) => i.path.join('.') === 'zapFeSeedPath')).toBe(true)
+  })
+
+  it('defaults discoverySeedPaths to empty and rejects lines that are not paths', () => {
+    const ok = SiteInputSchema.safeParse({ ...minimal, discoverySeedPaths: '/\n/#/basket\n# c' })
+    expect(ok.success).toBe(true)
+    expect(
+      SiteInputSchema.safeParse(minimal).success &&
+        SiteInputSchema.parse(minimal).discoverySeedPaths,
+    ).toBe('')
+    const issues = issuesFor({ ...minimal, discoverySeedPaths: '/ok\nhttp://x.example/' })
+    expect(issues.map((i) => i.path.join('.'))).toEqual(['discoverySeedPaths'])
+    expect(issues[0]?.message).toContain('line 2')
+  })
+
+  it('accepts browserStorage items and enforces cookie naming rules', () => {
+    expect(
+      SiteInputSchema.safeParse({
+        ...minimal,
+        browserStorage: [
+          { kind: 'localStorage', name: 'token', value: 'abc' },
+          { kind: 'cookie', name: 'token', value: 'abc' },
+        ],
+      }).success,
+    ).toBe(true)
+    const issues = issuesFor({
+      ...minimal,
+      browserStorage: [{ kind: 'cookie', name: 'bad name', value: 'x;y' }],
+    })
+    expect(issues.map((i) => i.path.join('.'))).toEqual([
+      'browserStorage.0.name',
+      'browserStorage.0.value',
+    ])
+    expect(
+      issuesFor({ ...minimal, browserStorage: [{ kind: 'indexedDB', name: 'a', value: 'b' }] }),
+    ).not.toHaveLength(0)
   })
 })

@@ -3,6 +3,12 @@ import { normalizeCrawledEntries } from '../../domain/crawledUrls'
 import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { EngineError, OOM_RUNBOOK, type DiscoverRunner } from '../types'
+import {
+  BROWSER_STORAGE_SCRIPT_ENGINE,
+  BROWSER_STORAGE_SCRIPT_FILE,
+  BROWSER_STORAGE_SCRIPT_NAME,
+  buildBrowserStorageScript,
+} from './browserStorageScript'
 import { buildZapDiscoverPlan, planToYaml } from './plan'
 import { buildReplacerConf } from './replacer'
 import { runZap, zapPath } from './runZap'
@@ -15,6 +21,7 @@ import {
   SITE_TREE_DUMP_SCRIPT_FILE,
   SITE_TREE_DUMP_SCRIPT_NAME,
 } from './siteTreeDump'
+import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
 
 /**
  * Discovery = ZAP's traditional + Ajax spiders from the site's seed path,
@@ -37,16 +44,28 @@ export const runZapDiscover: DiscoverRunner = async ({
   const api = site.apiBaseUrl
     ? rewriteLoopbackHost(site.apiBaseUrl + '/', alias).replace(/\/$/, '')
     : null
-  const seedUrl = joinUrl(front, site.zapFeSeedPath)
+  const seedPaths = resolveDiscoverySeeds(site)
+  const seedUrls = seedPaths.map((p) => joinUrl(front, p))
   const excludeRegexes = parseExcludePatterns(site.excludePaths).map(toZapExcludeRegex)
+  const origins = [front, ...(api ? [api] : [])]
+  const hasBrowserStorage = site.browserStorage.length > 0
   const plan = buildZapDiscoverPlan({
     context: {
       name: 'sakuda',
-      urls: [seedUrl],
-      includePaths: [front, ...(api ? [api] : [])].map((b) => `^${escapeRegex(b)}(/.*)?$`),
+      urls: seedUrls,
+      includePaths: origins.map((b) => `^${escapeRegex(b)}(/.*)?$`),
       excludePaths: excludeRegexes,
     },
-    seedUrl,
+    seedUrls,
+    ...(hasBrowserStorage
+      ? {
+          browserScript: {
+            file: zapPath(env, workDir, BROWSER_STORAGE_SCRIPT_FILE),
+            name: BROWSER_STORAGE_SCRIPT_NAME,
+            engine: BROWSER_STORAGE_SCRIPT_ENGINE,
+          },
+        }
+      : {}),
     spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
     ajaxMaxMinutes: site.zapFeSpiderMaxMinutes,
     scriptFile: zapPath(env, workDir, SITE_TREE_DUMP_SCRIPT_FILE),
@@ -56,13 +75,16 @@ export const runZapDiscover: DiscoverRunner = async ({
   logger.info(
     {
       discoveryId,
-      seedUrl: joinUrl(site.frontBaseUrl, site.zapFeSeedPath),
+      seedPaths,
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       headerNames: site.headerNames,
+      browserStorageNames: site.browserStorageNames,
     },
     'discovery start',
   )
-  const timeoutMs = (site.zapFeSpiderMaxMinutes * 2 + env.engineGraceMinutes) * 60_000
+  // One traditional spider + one Ajax spider per seed, each bounded by the site's limit.
+  const timeoutMs =
+    (site.zapFeSpiderMaxMinutes * (1 + seedUrls.length) + env.engineGraceMinutes) * 60_000
   const run = await runZap({
     label: `discover:${discoveryId}`,
     env,
@@ -74,6 +96,13 @@ export const runZapDiscover: DiscoverRunner = async ({
         zapPath(env, workDir, SITE_TREE_DUMP_OUTPUT_FILE),
       ),
     },
+    ...(hasBrowserStorage
+      ? {
+          secretFiles: {
+            [BROWSER_STORAGE_SCRIPT_FILE]: buildBrowserStorageScript(site.browserStorage, origins),
+          },
+        }
+      : {}),
     reportFile: SITE_TREE_DUMP_OUTPUT_FILE,
     timeoutMs,
     signal,
@@ -116,7 +145,8 @@ export const runZapDiscover: DiscoverRunner = async ({
     exitCode: run.result.code,
     signal: run.result.signal,
     meta: {
-      seedUrl: joinUrl(site.frontBaseUrl, site.zapFeSeedPath),
+      seedUrls: seedPaths.map((p) => joinUrl(site.frontBaseUrl, p)),
+      browserStorage: site.browserStorageNames.map((n) => `${n.kind}:${n.name}`),
       spider: 'traditional + ajax',
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       nodeCount: dump.entries.length + dump.structuralCount,

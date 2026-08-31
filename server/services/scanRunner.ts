@@ -4,7 +4,7 @@ import type { Env } from '../config/env'
 import type { Db } from '../db/client'
 import { engineRuns, findings, scans } from '../db/schema'
 import { buildFingerprint } from '../domain/fingerprint'
-import type { HeaderCipher } from '../domain/headerCipher'
+import type { SiteCipher } from '../domain/headerCipher'
 import { orderEngines } from '../engines'
 import { EngineError, type EngineRunner } from '../engines/types'
 import type { Logger } from '../lib/logger'
@@ -15,7 +15,7 @@ import { emptyCounts } from '#shared/utils/severity'
 export interface ScanRunnerDeps {
   db: Db
   env: Env
-  cipher: HeaderCipher
+  cipher: SiteCipher
   runners: Record<Engine, EngineRunner>
   logger: Logger
   now: () => Date

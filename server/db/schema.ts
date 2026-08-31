@@ -1,4 +1,5 @@
 import { blob, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import type { BrowserStorageName } from '#shared/schemas/browserStorage'
 import type { DiscoveredUrl, Engine, SeverityCounts, SiteSnapshot } from '#shared/types/api'
 
 export const sites = sqliteTable('sites', {
@@ -10,6 +11,7 @@ export const sites = sqliteTable('sites', {
   openapiUrl: text('openapi_url'),
   openapiJson: text('openapi_json'),
   zapFeSeedPath: text('zap_fe_seed_path').notNull(),
+  discoverySeedPaths: text('discovery_seed_paths').notNull().default(''),
   excludePaths: text('exclude_paths').notNull(),
   nucleiRateLimit: integer('nuclei_rate_limit').notNull(),
   zapApiMaxMinutes: integer('zap_api_max_minutes').notNull(),
@@ -17,6 +19,11 @@ export const sites = sqliteTable('sites', {
   nonLocalConfirmed: integer('non_local_confirmed', { mode: 'boolean' }).notNull(),
   headersEnc: blob('headers_enc', { mode: 'buffer' }),
   headerNames: text('header_names', { mode: 'json' }).$type<string[]>().notNull(),
+  browserStorageEnc: blob('browser_storage_enc', { mode: 'buffer' }),
+  browserStorageNames: text('browser_storage_names', { mode: 'json' })
+    .$type<BrowserStorageName[]>()
+    .notNull()
+    .default([]),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

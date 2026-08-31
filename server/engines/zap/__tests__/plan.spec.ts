@@ -159,7 +159,7 @@ describe('buildZapDiscoverPlan', () => {
     }
     const plan = buildZapDiscoverPlan({
       context,
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 3,
       ajaxMaxMinutes: 3,
       scriptFile: '/zap/wrk/dump-site-tree.js',
@@ -204,6 +204,84 @@ describe('buildZapDiscoverPlan', () => {
         },
       ],
     })
+  })
+})
+
+describe('browser-storage script jobs and multiple discovery seeds', () => {
+  const context = {
+    name: 'sakuda',
+    urls: ['http://h:3000/'],
+    includePaths: ['^http://h:3000(/.*)?$'],
+    excludePaths: [],
+  }
+  const browserScript = {
+    file: '/zap/wrk/browser-storage.js',
+    name: 'sakuda-browser-storage',
+    engine: 'ECMAScript : Graal.js',
+  }
+  const seleniumJobs = [
+    {
+      type: 'script',
+      parameters: {
+        action: 'add',
+        type: 'selenium',
+        engine: 'ECMAScript : Graal.js',
+        name: 'sakuda-browser-storage',
+        file: '/zap/wrk/browser-storage.js',
+      },
+    },
+    {
+      type: 'script',
+      parameters: { action: 'enable', type: 'selenium', name: 'sakuda-browser-storage' },
+    },
+  ]
+  // as: plans are Record<string, unknown>; narrow the job list for assertions only
+  const jobsOf = (plan: Record<string, unknown>) =>
+    plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>
+
+  it('discovery: registers + enables the selenium script before any spider, one Ajax spider per seed', () => {
+    const plan = buildZapDiscoverPlan({
+      context,
+      seedUrls: ['http://h:3000/#/', 'http://h:3000/#/basket', 'http://h:3000/profile'],
+      browserScript,
+      spiderMaxMinutes: 2,
+      ajaxMaxMinutes: 2,
+      scriptFile: '/zap/wrk/dump-site-tree.js',
+      scriptName: 'sakuda-dump-site-tree',
+      scriptEngine: 'ECMAScript : Graal.js',
+    })
+    const jobs = jobsOf(plan)
+    expect(jobs.slice(1, 3)).toEqual(seleniumJobs)
+    expect(jobs.map((j) => j.type)).toEqual([
+      'passiveScan-config',
+      'script',
+      'script',
+      'spider',
+      'spiderAjax',
+      'spiderAjax',
+      'spiderAjax',
+      'script',
+      'script',
+    ])
+    expect(jobs[3]?.parameters.url).toBe('http://h:3000/#/')
+    expect(jobs.filter((j) => j.type === 'spiderAjax').map((j) => j.parameters.url)).toEqual([
+      'http://h:3000/#/',
+      'http://h:3000/#/basket',
+      'http://h:3000/profile',
+    ])
+  })
+
+  it('zap-fe: includes the selenium jobs only when a browser script is given', () => {
+    const base = {
+      context,
+      seedUrl: 'http://h:3000/',
+      spiderMaxMinutes: 5,
+      ajaxMaxMinutes: 5,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    }
+    expect(jobsOf(buildZapFePlan({ ...base, browserScript })).slice(1, 3)).toEqual(seleniumJobs)
+    expect(jobsOf(buildZapFePlan(base)).some((j) => j.parameters.type === 'selenium')).toBe(false)
   })
 })
 

@@ -62,6 +62,7 @@ describe('buildNucleiArgs', () => {
         concurrency: 25,
         tags: ['xss'],
         headers: [],
+        browserStorage: [],
       }),
     ).toContain('-omit-raw')
   })

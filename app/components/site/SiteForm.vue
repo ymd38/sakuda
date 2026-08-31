@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
+import { BROWSER_STORAGE_KINDS } from '#shared/schemas/browserStorage'
 import type { Header } from '#shared/schemas/headers'
 import type { SiteInput } from '#shared/schemas/site'
 import type { SitePublic } from '#shared/types/api'
@@ -22,6 +24,7 @@ const form = reactive({
   openapiUrl: props.initial?.openapiUrl ?? '',
   openapiJson: props.initial?.openapiJson ?? '',
   zapFeSeedPath: props.initial?.zapFeSeedPath ?? '/',
+  discoverySeedPaths: props.initial?.discoverySeedPaths ?? '',
   excludePaths: props.initial?.excludePaths ?? '',
   nucleiRateLimit: props.initial?.nucleiRateLimit ?? 50,
   zapApiMaxMinutes: props.initial?.zapApiMaxMinutes ?? 45,
@@ -79,6 +82,33 @@ function toHeader(row: { name: string; value: string }): Header {
   return { name: row.name, value: row.value }
 }
 
+// Browser storage follows the same write-only contract as headers: the API
+// only ever returns kind + name, so in edit mode the editor starts hidden and
+// an untouched form omits `browserStorage` (keeps the stored set).
+type StorageRow = { kind: BrowserStorageItem['kind']; name: string; value: string }
+const storageEditable = ref(!isEditMode.value)
+const storageRows = reactive<StorageRow[]>([])
+
+function addStorageRow() {
+  storageRows.push({ kind: 'localStorage', name: '', value: '' })
+}
+
+function removeStorageRow(index: number) {
+  storageRows.splice(index, 1)
+}
+
+function startReplacingStorage() {
+  storageEditable.value = true
+}
+
+function isCompleteStorage(row: StorageRow): boolean {
+  return row.name.trim() !== '' && row.value.trim() !== ''
+}
+
+function toStorageItem(row: StorageRow): BrowserStorageItem {
+  return { kind: row.kind, name: row.name, value: row.value }
+}
+
 const canSubmit = computed(
   () => !props.submitting && (!requiresConfirmation.value || form.nonLocalConfirmed),
 )
@@ -100,14 +130,22 @@ function buildPayload(): SiteInput {
     openapiUrl: emptyToNull(form.openapiUrl),
     openapiJson: emptyToNull(form.openapiJson),
     zapFeSeedPath: form.zapFeSeedPath,
+    discoverySeedPaths: form.discoverySeedPaths,
     excludePaths: form.excludePaths,
     nucleiRateLimit: toFiniteNumber(form.nucleiRateLimit, 50),
     zapApiMaxMinutes: toFiniteNumber(form.zapApiMaxMinutes, 45),
     zapFeSpiderMaxMinutes: toFiniteNumber(form.zapFeSpiderMaxMinutes, 5),
     nonLocalConfirmed: form.nonLocalConfirmed,
   }
-  if (!headersEditable.value) return base
-  return { ...base, headers: headerRows.filter(isCompleteHeader).map(toHeader) }
+  return {
+    ...base,
+    ...(headersEditable.value
+      ? { headers: headerRows.filter(isCompleteHeader).map(toHeader) }
+      : {}),
+    ...(storageEditable.value
+      ? { browserStorage: storageRows.filter(isCompleteStorage).map(toStorageItem) }
+      : {}),
+  }
 }
 
 function handleSubmit() {
@@ -248,6 +286,25 @@ function handleSubmit() {
         sites; SPAs with hash routing use e.g. "/#/". With auth headers, point it at a page only a
         logged-in user can reach (e.g. "/dashboard") so sakuda can warn when the session was not
         accepted.
+      </p>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      <label for="site-discovery-seed-paths" class="text-caption-md font-medium text-ink"
+        >Discovery seed paths
+        <span class="text-mute">(optional — empty uses the ZAP frontend seed path)</span></label
+      >
+      <textarea
+        id="site-discovery-seed-paths"
+        v-model="form.discoverySeedPaths"
+        data-testid="discovery-seed-paths"
+        rows="3"
+        placeholder="/#/&#10;/#/search?q=apple&#10;/#/basket&#10;/profile"
+        class="textarea-soft"
+      />
+      <p class="text-caption-sm text-mute">
+        Where "Discover URLs" starts, one path per line; each gets its own Ajax spider run. List the
+        pages of your app (hash routes are fine) so the APIs behind them are found.
       </p>
     </div>
 
@@ -394,6 +451,84 @@ function handleSubmit() {
           @click="addHeaderRow"
         >
           Add header
+        </button>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-3">
+      <span class="text-caption-md font-medium text-ink">Browser storage</span>
+      <p class="text-caption-sm text-mute">
+        Values seeded into ZAP's browser (localStorage / sessionStorage / cookie) before the Ajax
+        spider crawls, so a single-page app renders as logged in. Headers authenticate requests;
+        this authenticates the UI. Stored encrypted, never shown again.
+      </p>
+
+      <div v-if="isEditMode && !storageEditable" class="flex flex-col gap-3">
+        <ul class="flex flex-wrap gap-2">
+          <li
+            v-for="item in props.initial?.browserStorageNames ?? []"
+            :key="`${item.kind}:${item.name}`"
+            data-testid="storage-chip"
+            class="badge"
+          >
+            {{ item.kind }}:{{ item.name }}
+          </li>
+          <li v-if="!props.initial?.browserStorageNames.length" class="text-caption-sm text-mute">
+            No browser storage configured.
+          </li>
+        </ul>
+        <button
+          type="button"
+          data-testid="replace-storage"
+          class="btn-secondary self-start"
+          @click="startReplacingStorage"
+        >
+          Replace browser storage
+        </button>
+      </div>
+
+      <div v-else data-testid="storage-editor" class="flex flex-col gap-3">
+        <div
+          v-for="(row, index) in storageRows"
+          :key="index"
+          class="flex flex-col gap-2 sm:flex-row sm:items-center"
+        >
+          <select v-model="row.kind" :data-testid="`storage-kind-${index}`" class="input-pill">
+            <option v-for="kind in BROWSER_STORAGE_KINDS" :key="kind" :value="kind">
+              {{ kind }}
+            </option>
+          </select>
+          <input
+            v-model="row.name"
+            :data-testid="`storage-name-${index}`"
+            type="text"
+            placeholder="Key / cookie name"
+            class="input-pill"
+          />
+          <input
+            v-model="row.value"
+            :data-testid="`storage-value-${index}`"
+            type="password"
+            autocomplete="off"
+            placeholder="Value"
+            class="input-pill"
+          />
+          <button
+            type="button"
+            :data-testid="`remove-storage-${index}`"
+            class="btn-secondary"
+            @click="removeStorageRow(index)"
+          >
+            Remove
+          </button>
+        </div>
+        <button
+          type="button"
+          data-testid="add-storage"
+          class="btn-secondary self-start"
+          @click="addStorageRow"
+        >
+          Add item
         </button>
       </div>
     </div>

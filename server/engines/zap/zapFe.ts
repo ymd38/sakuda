@@ -6,6 +6,12 @@ import { buildZapFePlan, planToYaml, ZAP_REPORT_JSON } from './plan'
 import { buildReplacerConf } from './replacer'
 import { normalizeZapReport, parseZapReport } from './report'
 import { runZap, zapPath } from './runZap'
+import {
+  BROWSER_STORAGE_SCRIPT_ENGINE,
+  BROWSER_STORAGE_SCRIPT_FILE,
+  BROWSER_STORAGE_SCRIPT_NAME,
+  buildBrowserStorageScript,
+} from './browserStorageScript'
 
 export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
   const alias = env.zap.localhostAlias
@@ -14,6 +20,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   const seedUrl = joinUrl(base, site.zapFeSeedPath)
   const excludeRegexes = parseExcludePatterns(site.excludePaths).map(toZapExcludeRegex)
   const passiveMaxMinutes = 5
+  const hasBrowserStorage = site.browserStorage.length > 0
   const plan = buildZapFePlan({
     context: {
       name: 'sakuda',
@@ -22,6 +29,15 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       excludePaths: excludeRegexes,
     },
     seedUrl,
+    ...(hasBrowserStorage
+      ? {
+          browserScript: {
+            file: zapPath(env, workDir, BROWSER_STORAGE_SCRIPT_FILE),
+            name: BROWSER_STORAGE_SCRIPT_NAME,
+            engine: BROWSER_STORAGE_SCRIPT_ENGINE,
+          },
+        }
+      : {}),
     spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
     ajaxMaxMinutes: site.zapFeSpiderMaxMinutes,
     passiveMaxMinutes,
@@ -34,6 +50,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       seedUrl: joinUrl(site.frontBaseUrl, site.zapFeSeedPath),
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       headerNames: site.headerNames,
+      browserStorageNames: site.browserStorageNames,
     },
     'zap-fe start',
   )
@@ -45,6 +62,13 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     workDir,
     planYaml: planToYaml(plan),
     replacerConf: site.headers.length ? buildReplacerConf(site.headers) : null,
+    ...(hasBrowserStorage
+      ? {
+          secretFiles: {
+            [BROWSER_STORAGE_SCRIPT_FILE]: buildBrowserStorageScript(site.browserStorage, [base]),
+          },
+        }
+      : {}),
     timeoutMs,
     signal,
     logger,
@@ -85,6 +109,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       zapVersion: n.zapVersion,
       seedUrl: joinUrl(site.frontBaseUrl, site.zapFeSeedPath),
       spider: 'traditional + ajax',
+      browserStorage: site.browserStorageNames.map((n) => `${n.kind}:${n.name}`),
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       reachedUrlCount: n.reachedUrls.length,
       reachedUrls: n.reachedUrls.slice(0, 200),

@@ -25,16 +25,19 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     openapiUrl: null,
     openapiJson: null,
     zapFeSeedPath: '/',
+    discoverySeedPaths: '',
     excludePaths: '/admin/*',
     nucleiRateLimit: 50,
     zapApiMaxMinutes: 45,
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: false,
     headerNames: [],
+    browserStorageNames: [],
     requiresConfirmation: false,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     headers: [],
+    browserStorage: [],
     ...overrides,
   }
 }
@@ -95,7 +98,8 @@ describe('runZapDiscover', () => {
       },
     ])
     expect(out.meta).toMatchObject({
-      seedUrl: 'http://localhost:3000/',
+      seedUrls: ['http://localhost:3000/'],
+      browserStorage: [],
       spider: 'traditional + ajax',
       nodeCount: 12,
       structuralCount: 2,
@@ -157,6 +161,56 @@ describe('runZapDiscover', () => {
       '^http:\\/\\/localhost:3000(/.*)?$',
       '^http:\\/\\/localhost:8080(/.*)?$',
     ])
+  })
+
+  it('with browser storage + several seeds: writes the selenium script 0600 for the run only, registers it, and crawls every seed', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const site = baseSite({
+      discoverySeedPaths: '/#/\n/#/basket',
+      browserStorage: [
+        { kind: 'localStorage', name: 'token', value: 'eyJ.secret' },
+        { kind: 'sessionStorage', name: 'bid', value: '6' },
+      ],
+      browserStorageNames: [
+        { kind: 'localStorage', name: 'token' },
+        { kind: 'sessionStorage', name: 'bid' },
+      ],
+    })
+
+    const out = await runZapDiscover({
+      discoveryId: 'disc-5',
+      site,
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    // secret script existed with mode 0600 while ZAP ran, and is gone afterwards
+    expect(JSON.parse(readFileSync(join(workDir, 'secret-mode.json'), 'utf8'))).toBe(0o600)
+    expect(existsSync(join(workDir, 'browser-storage.js'))).toBe(false)
+    const plan: unknown = YAML.parse(readFileSync(join(workDir, 'plan.yaml'), 'utf8'))
+    // as: see above
+    const { jobs } = plan as PlanShape
+    expect(jobs[1]?.parameters).toMatchObject({ action: 'add', type: 'selenium' })
+    expect(jobs[1]?.parameters.file).toBe(join(workDir, 'browser-storage.js'))
+    expect(jobs[2]?.parameters).toMatchObject({ action: 'enable', type: 'selenium' })
+    expect(jobs.filter((j) => j.type === 'spiderAjax').map((j) => j.parameters.url)).toEqual([
+      'http://localhost:3000/#/',
+      'http://localhost:3000/#/basket',
+    ])
+    expect(out.meta).toMatchObject({
+      seedUrls: ['http://localhost:3000/#/', 'http://localhost:3000/#/basket'],
+      browserStorage: ['localStorage:token', 'sessionStorage:bid'],
+    })
+    // the secret value never reaches meta / warnings
+    expect(JSON.stringify(out)).not.toContain('eyJ.secret')
   })
 
   it('throws EngineError when zap.sh produces no site-tree dump', async () => {

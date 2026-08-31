@@ -6,7 +6,7 @@ import { siteRequiresConfirmation } from '#shared/utils/localHost'
  * importing siteService, which itself depends on scanService for
  * `latestScanSummary` — keeping the import graph acyclic. */
 export function toSitePublic(row: SiteRow): SitePublic {
-  const { headersEnc: _enc, ...rest } = row // strip ciphertext
+  const { headersEnc: _enc, browserStorageEnc: _storageEnc, ...rest } = row // strip ciphertext
   return {
     ...rest,
     requiresConfirmation: siteRequiresConfirmation(

@@ -214,6 +214,39 @@ describe('runZap', () => {
     expect(existsSync(join(workDir, 'replacer.conf'))).toBe(false)
   })
 
+  it('writes secretFiles with mode 0600 for the run and removes them after, even when runCommand throws', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    await runZap({
+      label: 'zap-test',
+      env: makeEnv({}, fakeBin),
+      workDir,
+      planYaml: 'plan: yes\n',
+      replacerConf: null,
+      secretFiles: { 'browser-storage.js': 'var ITEMS = [];\n' },
+      timeoutMs: 5000,
+      signal: new AbortController().signal,
+      logger,
+    })
+    expect(JSON.parse(readFileSync(join(workDir, 'secret-mode.json'), 'utf8'))).toBe(0o600)
+    expect(existsSync(join(workDir, 'browser-storage.js'))).toBe(false)
+
+    const workDir2 = join(tmp, 'work2')
+    await expect(
+      runZap({
+        label: 'zap-test',
+        env: makeEnv({}, join(tmp, 'does-not-exist')),
+        workDir: workDir2,
+        planYaml: 'plan: yes\n',
+        replacerConf: null,
+        secretFiles: { 'browser-storage.js': 'var ITEMS = [];\n' },
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        logger,
+      }),
+    ).rejects.toThrow()
+    expect(existsSync(join(workDir2, 'browser-storage.js'))).toBe(false)
+  })
+
   it('returns reportText null when no report file was created', async () => {
     const fakeBin = writeFakeZap(tmp, FIXTURE)
     const env = makeEnv({}, fakeBin)

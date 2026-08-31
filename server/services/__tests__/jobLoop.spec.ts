@@ -8,7 +8,7 @@ import { eq } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
 import { discoveries, scans } from '../../db/schema'
 import { parseEnv, type Env } from '../../config/env'
-import { createHeaderCipher } from '../../domain/headerCipher'
+import { createSiteCipher } from '../../domain/headerCipher'
 import type { DiscoverRunner, EngineOutput, EngineRunner } from '../../engines/types'
 import { logger } from '../../lib/logger'
 import { createSite, type SiteServiceDeps } from '../siteService'
@@ -50,7 +50,7 @@ beforeEach(() => {
     SAKUDA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     SAKUDA_DATA_DIR: mkdtempSync(join(tmpdir(), 'sakuda-jobloop-')),
   })
-  siteDeps = { db, cipher: createHeaderCipher(env.encryptionKey), now, id: randomUUID }
+  siteDeps = { db, cipher: createSiteCipher(env.encryptionKey), now, id: randomUUID }
 })
 
 afterEach(async () => {

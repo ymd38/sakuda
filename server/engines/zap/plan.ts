@@ -7,9 +7,19 @@ export interface ZapContext {
   excludePaths: string[]
 }
 
+/** A ZAP "selenium" script (`browserLaunched` hook) registered and enabled
+ * before any browser-driven job, so the Ajax spider starts logged in. */
+export interface ZapBrowserScript {
+  /** Container-side path (see `zapPath`). */
+  file: string
+  name: string
+  engine: string
+}
+
 export interface ZapFePlanInput {
   context: ZapContext
   seedUrl: string
+  browserScript?: ZapBrowserScript
   spiderMaxMinutes: number
   ajaxMaxMinutes: number
   passiveMaxMinutes: number
@@ -27,7 +37,9 @@ export interface ZapApiPlanInput {
 
 export interface ZapDiscoverPlanInput {
   context: ZapContext
-  seedUrl: string
+  /** The traditional spider starts from the first seed; the Ajax spider runs once per seed. */
+  seedUrls: string[]
+  browserScript?: ZapBrowserScript
   spiderMaxMinutes: number
   ajaxMaxMinutes: number
   /** Container-side path of the site-tree dump script (see `siteTreeDump.ts`). */
@@ -42,6 +54,34 @@ export const ZAP_REPORT_HTML = 'report.html'
 const envFor = (context: ZapContext) => ({
   contexts: [context],
   parameters: { failOnError: false, failOnWarning: false, progressToStdout: true },
+})
+
+const browserScriptJobs = (s: ZapBrowserScript | undefined) =>
+  s
+    ? [
+        {
+          type: 'script',
+          parameters: {
+            action: 'add',
+            type: 'selenium',
+            engine: s.engine,
+            name: s.name,
+            file: s.file,
+          },
+        },
+        { type: 'script', parameters: { action: 'enable', type: 'selenium', name: s.name } },
+      ]
+    : []
+
+const ajaxSpiderJob = (contextName: string, url: string, maxDuration: number) => ({
+  type: 'spiderAjax',
+  parameters: {
+    context: contextName,
+    url,
+    maxDuration,
+    numberOfBrowsers: 1,
+    browserId: 'firefox-headless',
+  },
 })
 
 const reportJobs = (reportDir: string) => [
@@ -60,20 +100,12 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
     env: envFor(i.context),
     jobs: [
       { type: 'passiveScan-config', parameters: { enableTags: false, maxAlertsPerRule: 10 } },
+      ...browserScriptJobs(i.browserScript),
       {
         type: 'spider',
         parameters: { context: i.context.name, url: i.seedUrl, maxDuration: i.spiderMaxMinutes },
       },
-      {
-        type: 'spiderAjax',
-        parameters: {
-          context: i.context.name,
-          url: i.seedUrl,
-          maxDuration: i.ajaxMaxMinutes,
-          numberOfBrowsers: 1,
-          browserId: 'firefox-headless',
-        },
-      },
+      ajaxSpiderJob(i.context.name, i.seedUrl, i.ajaxMaxMinutes),
       { type: 'passiveScan-wait', parameters: { maxDuration: i.passiveMaxMinutes } },
       ...reportJobs(i.reportDir),
     ],
@@ -88,20 +120,16 @@ export function buildZapDiscoverPlan(i: ZapDiscoverPlanInput): Record<string, un
     env: envFor(i.context),
     jobs: [
       { type: 'passiveScan-config', parameters: { disableAllRules: true } },
+      ...browserScriptJobs(i.browserScript),
       {
         type: 'spider',
-        parameters: { context: i.context.name, url: i.seedUrl, maxDuration: i.spiderMaxMinutes },
-      },
-      {
-        type: 'spiderAjax',
         parameters: {
           context: i.context.name,
-          url: i.seedUrl,
-          maxDuration: i.ajaxMaxMinutes,
-          numberOfBrowsers: 1,
-          browserId: 'firefox-headless',
+          url: i.seedUrls[0],
+          maxDuration: i.spiderMaxMinutes,
         },
       },
+      ...i.seedUrls.map((url) => ajaxSpiderJob(i.context.name, url, i.ajaxMaxMinutes)),
       {
         type: 'script',
         parameters: {

@@ -6,10 +6,16 @@ import type {
   SitePublic,
 } from '#shared/types/api'
 import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
+import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
 import { urlToTargetLine } from '#shared/utils/targetLines'
 
 const props = defineProps<{ site: SitePublic }>()
 const emit = defineEmits<{ saved: [site: SitePublic] }>()
+
+const seeds = computed(() => resolveDiscoverySeeds(props.site))
+const storageSummary = computed(() =>
+  props.site.browserStorageNames.map((n) => `${n.kind}:${n.name}`).join(', '),
+)
 
 const { data: discoveries, refresh: refreshList } = await useFetch<DiscoverySummary[]>(
   `/api/sites/${props.site.id}/discoveries`,
@@ -166,10 +172,18 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
         <template v-if="detail.status === 'done'"> · {{ detail.urlCount }} URLs</template>
       </p>
       <p v-else-if="!currentId" class="text-caption-md text-mute">
-        No discovery yet. ZAP's spider crawls from the seed path for up to
-        {{ site.zapFeSpiderMaxMinutes }} min each (traditional + Ajax).
+        No discovery yet. ZAP's spiders crawl for up to {{ site.zapFeSpiderMaxMinutes }} min each
+        (traditional + Ajax per seed).
       </p>
     </div>
+
+    <p class="text-caption-sm text-mute" data-testid="discovery-seeds">
+      Seeds: <code>{{ seeds.join('  ') }}</code>
+      <template v-if="storageSummary"> · browser storage: {{ storageSummary }}</template>
+      <template v-else>
+        · no browser storage — SPA pages behind a login stay hidden; add the login token in Edit
+      </template>
+    </p>
 
     <p v-if="startError" data-testid="discovery-error" class="text-sale text-body-md">
       {{ startError }}

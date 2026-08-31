@@ -11,12 +11,14 @@ const siteSnapshot: SiteSnapshot = {
   openapiUrl: null,
   hasOpenapiJson: false,
   zapFeSeedPath: '/',
+  discoverySeedPaths: '',
   excludePaths: '',
   nucleiRateLimit: 50,
   zapApiMaxMinutes: 10,
   zapFeSpiderMaxMinutes: 5,
   nonLocalConfirmed: true,
   headerNames: ['Authorization'],
+  browserStorageNames: [],
   requiresConfirmation: false,
 }
 

@@ -15,6 +15,7 @@ function siteRow(id: string) {
     openapiUrl: null,
     openapiJson: null,
     zapFeSeedPath: '/',
+    discoverySeedPaths: '',
     excludePaths: '',
     nucleiRateLimit: 50,
     zapApiMaxMinutes: 45,
@@ -22,6 +23,7 @@ function siteRow(id: string) {
     nonLocalConfirmed: false,
     headersEnc: null,
     headerNames: [],
+    browserStorageNames: [],
     createdAt: now,
     updatedAt: now,
   }

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { Env } from '../config/env'
 import type { Db } from '../db/client'
 import { discoveries } from '../db/schema'
-import type { HeaderCipher } from '../domain/headerCipher'
+import type { SiteCipher } from '../domain/headerCipher'
 import { EngineError, type DiscoverRunner } from '../engines/types'
 import type { Logger } from '../lib/logger'
 import { loadSiteWithHeaders } from './siteService'
@@ -11,7 +11,7 @@ import { loadSiteWithHeaders } from './siteService'
 export interface DiscoveryRunnerDeps {
   db: Db
   env: Env
-  cipher: HeaderCipher
+  cipher: SiteCipher
   discover: DiscoverRunner
   logger: Logger
   now: () => Date

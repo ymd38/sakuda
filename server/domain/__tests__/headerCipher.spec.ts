@@ -3,7 +3,9 @@ import { randomBytes, createCipheriv } from 'node:crypto'
 import {
   DecryptError,
   InvalidKeyError,
+  createBrowserStorageCipher,
   createHeaderCipher,
+  createSiteCipher,
   headersToNucleiArgs,
 } from '../headerCipher'
 
@@ -85,5 +87,35 @@ describe('createHeaderCipher', () => {
       '-H',
       'Authorization: Bearer x',
     ])
+  })
+
+  describe('createBrowserStorageCipher (same envelope, purpose-bound AAD)', () => {
+    const items = [
+      { kind: 'localStorage' as const, name: 'token', value: 'eyJ.abc' },
+      { kind: 'sessionStorage' as const, name: 'bid', value: '6' },
+      { kind: 'cookie' as const, name: 'token', value: 'eyJ.abc' },
+    ]
+
+    it('round-trips browser storage items with the version-1 envelope', () => {
+      const c = createBrowserStorageCipher(key)
+      const env = c.seal(items, 'site-1')
+      expect(env[0]).toBe(1)
+      expect(c.open(env, 'site-1')).toEqual(items)
+    })
+
+    it('never opens a headers envelope as browser storage, nor the reverse (AAD purpose)', () => {
+      const site = createSiteCipher(key)
+      const headerEnv = site.headers.seal(headers, 'site-1')
+      const storageEnv = site.browserStorage.seal(items, 'site-1')
+      expect(() => site.browserStorage.open(headerEnv, 'site-1')).toThrow(DecryptError)
+      expect(() => site.headers.open(storageEnv, 'site-1')).toThrow(DecryptError)
+    })
+
+    it('rejects an empty list and invalid items on seal', () => {
+      const c = createBrowserStorageCipher(key)
+      expect(() => c.seal([], 's')).toThrow(/no browser storage/)
+      expect(() => c.seal([{ kind: 'cookie', name: 'a b', value: 'x' }], 's')).toThrow()
+      expect(() => c.seal([{ kind: 'localStorage', name: 'k', value: 'a\nb' }], 's')).toThrow()
+    })
   })
 })

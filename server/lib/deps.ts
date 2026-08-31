@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { getEnv } from '../config/env'
 import { getDb } from '../db/client'
-import { createHeaderCipher, type HeaderCipher } from '../domain/headerCipher'
+import { createSiteCipher, type SiteCipher } from '../domain/headerCipher'
 import type { SiteServiceDeps } from '../services/siteService'
 
-let cipher: HeaderCipher | undefined
+let cipher: SiteCipher | undefined
 
-function getCipher(): HeaderCipher {
-  cipher ??= createHeaderCipher(getEnv().encryptionKey)
+function getCipher(): SiteCipher {
+  cipher ??= createSiteCipher(getEnv().encryptionKey)
   return cipher
 }
 

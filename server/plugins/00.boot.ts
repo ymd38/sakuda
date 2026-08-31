@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { EnvError, getEnv } from '../config/env'
 import { closeDb, getDb } from '../db/client'
-import { createHeaderCipher } from '../domain/headerCipher'
+import { createSiteCipher } from '../domain/headerCipher'
 import { engineRunners } from '../engines'
 import { runZapDiscover } from '../engines/zap/zapDiscover'
 import { createJobLoop } from '../services/jobLoop'
@@ -39,7 +39,7 @@ export default defineNitroPlugin((nitroApp) => {
   const loop = createJobLoop({
     db,
     env,
-    cipher: createHeaderCipher(env.encryptionKey),
+    cipher: createSiteCipher(env.encryptionKey),
     runners: engineRunners,
     discover: runZapDiscover,
     logger,

@@ -9,7 +9,7 @@ import { eq, sql } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
 import { discoveries, sites } from '../../db/schema'
 import { parseEnv, type Env } from '../../config/env'
-import { createHeaderCipher } from '../../domain/headerCipher'
+import { createSiteCipher } from '../../domain/headerCipher'
 import { EngineError, type DiscoverOutput, type DiscoverRunner } from '../../engines/types'
 import { logger } from '../../lib/logger'
 import { createSite, type SiteServiceDeps } from '../siteService'
@@ -56,7 +56,7 @@ beforeEach(() => {
     SAKUDA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     SAKUDA_DATA_DIR: dataDir,
   })
-  siteDeps = { db, cipher: createHeaderCipher(env.encryptionKey), now, id: randomUUID }
+  siteDeps = { db, cipher: createSiteCipher(env.encryptionKey), now, id: randomUUID }
 })
 
 function queueAndClaim(siteId: string): string {
@@ -149,9 +149,12 @@ describe('runDiscovery', () => {
     const discoveryId = queueAndClaim(site.id)
     const deps = makeDeps(vi.fn(async () => output()))
     deps.cipher = {
-      seal: siteDeps.cipher.seal,
-      open: () => {
-        throw new Error('decryption failed')
+      ...siteDeps.cipher,
+      headers: {
+        seal: siteDeps.cipher.headers.seal,
+        open: () => {
+          throw new Error('decryption failed')
+        },
       },
     }
 

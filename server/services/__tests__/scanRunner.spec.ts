@@ -9,7 +9,7 @@ import { eq, sql } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
 import { engineRuns, findings, scans, sites } from '../../db/schema'
 import { parseEnv, type Env } from '../../config/env'
-import { createHeaderCipher, DecryptError } from '../../domain/headerCipher'
+import { createSiteCipher, DecryptError } from '../../domain/headerCipher'
 import { EngineError, type EngineOutput, type EngineRunner } from '../../engines/types'
 import { logger } from '../../lib/logger'
 import { createSite, type SiteServiceDeps } from '../siteService'
@@ -70,7 +70,7 @@ beforeEach(() => {
     SAKUDA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     SAKUDA_DATA_DIR: dataDir,
   })
-  siteDeps = { db, cipher: createHeaderCipher(env.encryptionKey), now, id: randomUUID }
+  siteDeps = { db, cipher: createSiteCipher(env.encryptionKey), now, id: randomUUID }
 })
 
 describe('runScan', () => {
@@ -208,9 +208,12 @@ describe('runScan', () => {
     // DecryptError from inside loadSiteWithHeaders, before the per-engine
     // try/catch in runScan is ever reached.
     deps.cipher = {
-      seal: siteDeps.cipher.seal,
-      open: () => {
-        throw new DecryptError('decryption failed (key/AAD mismatch or tampering)')
+      ...siteDeps.cipher,
+      headers: {
+        seal: siteDeps.cipher.headers.seal,
+        open: () => {
+          throw new DecryptError('decryption failed (key/AAD mismatch or tampering)')
+        },
       },
     }
 

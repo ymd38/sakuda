@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
 import { discoveries, scans, sites } from '../../db/schema'
-import { createHeaderCipher } from '../../domain/headerCipher'
+import { createSiteCipher } from '../../domain/headerCipher'
 import { createSite, type SiteServiceDeps } from '../siteService'
 import { createScan } from '../scanService'
 import { ServiceError } from '../errors'
@@ -33,7 +33,7 @@ beforeEach(() => {
   db = openDatabase({ file: ':memory:', migrationsFolder })
   siteDeps = {
     db,
-    cipher: createHeaderCipher(randomBytes(32).toString('base64')),
+    cipher: createSiteCipher(randomBytes(32).toString('base64')),
     now: () => new Date('2026-01-01T00:00:00Z'),
     id: () => `site-${++n}`,
   }
@@ -94,6 +94,7 @@ describe('createDiscovery', () => {
         openapiUrl: null,
         openapiJson: null,
         zapFeSeedPath: '/',
+        discoverySeedPaths: '',
         excludePaths: '',
         nucleiRateLimit: 50,
         zapApiMaxMinutes: 45,
@@ -101,6 +102,7 @@ describe('createDiscovery', () => {
         nonLocalConfirmed: false,
         headersEnc: null,
         headerNames: [],
+        browserStorageNames: [],
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       })

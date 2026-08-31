@@ -159,6 +159,39 @@ describe('api e2e', () => {
     ).toBe(409)
   })
 
+  it('browserStorage is write-only: names come back, values never do; bad seed lines are 422', async () => {
+    const secret = 'eyJ-super-secret-token-value'
+    const res = await postJson('/api/sites', {
+      name: 'SPA target',
+      frontBaseUrl: 'http://localhost:39994',
+      discoverySeedPaths: '/#/\n/#/basket',
+      browserStorage: [
+        { kind: 'localStorage', name: 'token', value: secret },
+        { kind: 'sessionStorage', name: 'bid', value: '6' },
+      ],
+    })
+    expect(res.status).toBe(201)
+    const site: unknown = await res.json()
+    expect(site).toMatchObject({
+      discoverySeedPaths: '/#/\n/#/basket',
+      browserStorageNames: [
+        { kind: 'localStorage', name: 'token' },
+        { kind: 'sessionStorage', name: 'bid' },
+      ],
+    })
+    expect(JSON.stringify(site)).not.toContain(secret)
+    const again = await fetch(`/api/sites/${requireId(site)}`)
+    expect(JSON.stringify(await again.json())).not.toContain(secret)
+
+    const bad = await postJson('/api/sites', {
+      name: 'Bad seeds',
+      frontBaseUrl: 'http://localhost:39995',
+      discoverySeedPaths: 'http://absolute.example/',
+    })
+    expect(bad.status).toBe(422)
+    expect(JSON.stringify(await bad.json())).toContain('discoverySeedPaths')
+  })
+
   it('POST /api/sites with a non-JSON content-type is rejected with 415 (I7)', async () => {
     const res = await fetch('/api/sites', {
       method: 'POST',

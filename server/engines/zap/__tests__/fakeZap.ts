@@ -37,6 +37,13 @@ if (fs.existsSync(confFile)) {
     String(fs.statSync(confFile).mode & 0o777),
   )
 }
+const secretFile = path.join(hostWorkDir, 'browser-storage.js')
+if (fs.existsSync(secretFile)) {
+  fs.writeFileSync(
+    path.join(hostWorkDir, 'secret-mode.json'),
+    String(fs.statSync(secretFile).mode & 0o777),
+  )
+}
 if (process.env.FAKE_ZAP_NO_REPORT !== '1') {
   fs.copyFileSync(${JSON.stringify(fixturePath)}, path.join(hostWorkDir, ${JSON.stringify(outputFile)}))
 }
