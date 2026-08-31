@@ -4,9 +4,11 @@ A self-hosted DAST (dynamic application security testing) app. Register a
 **site**, run scans against it with **nuclei**, **ZAP API** (active scan
 against an OpenAPI spec) and/or **ZAP frontend** (spider + baseline against a
 seed page), and browse the results from the UI: per-engine findings, a
-diff against the previous scan, Markdown export, and history charts. Nuclei
-always runs last: when ZAP frontend runs in the same scan, the URLs its
-spider reached are added as extra nuclei targets.
+diff against the previous scan, Markdown export, and history charts.
+**Discovery** is separate from scanning: ZAP's spider crawls the site, you
+review the URLs it found and save the ones you want as target paths, and
+nuclei scans that saved list on every run — no need to crawl again until the
+site changes.
 
 MVP scope: sites → scans → per-engine reports. See
 [Not in this MVP](#not-in-this-mvp) for what's deliberately out.
@@ -136,6 +138,28 @@ outside the team that owns the scanned target.
 **Retention model:** there is no per-scan expiry — a site's scan artifacts
 live on disk for as long as the site exists, and are deleted (best-effort)
 when the site itself is deleted.
+
+## Discovery — filling the target list
+
+Nuclei does not crawl; it scans exactly the **target paths** saved on the
+site (`/path` or `api:/path`, relative to the base URLs). On the site page:
+
+1. **Discover URLs** runs ZAP's traditional + Ajax spiders from the seed path
+   (each for up to `zapFeSpiderMaxMinutes`, with the site's headers) and dumps
+   ZAP's site tree — every URL the crawl requested, not only the ones that
+   raised an alert. Off-origin URLs, static assets, socket.io transports,
+   stack-trace pseudo-paths and `excludePaths` matches are dropped; the panel
+   shows how many and why.
+2. Tick the URLs you want scanned (everything not yet saved is pre-selected),
+   add paths by hand if you like, and **Save to targets**. Saving appends to
+   the list and never duplicates a path.
+3. Start a scan. Nuclei uses the saved list; ZAP frontend still crawls from
+   the seed path itself.
+
+A site runs one job at a time: a discovery is refused while a scan is
+queued/running and vice versa. Discovery artifacts (ZAP plan, logs, the
+site-tree dump) live under `<data dir>/discoveries/<id>` and are removed with
+the site.
 
 ## Not in this MVP
 

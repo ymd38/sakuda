@@ -8,7 +8,12 @@ import { deleteSite } from '../../services/siteService'
 export default defineEventHandler(async (event) => {
   const id = requireParam(event, 'id')
   try {
-    const deleted = await deleteSite(getDb(), id, { scansDir: getEnv().scansDir, logger })
+    const env = getEnv()
+    const deleted = await deleteSite(getDb(), id, {
+      scansDir: env.scansDir,
+      discoveriesDir: env.discoveriesDir,
+      logger,
+    })
     if (!deleted) throw createError({ statusCode: 404, statusMessage: 'site not found' })
     setResponseStatus(event, 204)
     return null

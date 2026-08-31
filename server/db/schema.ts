@@ -1,5 +1,5 @@
 import { blob, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
-import type { Engine, SeverityCounts, SiteSnapshot } from '#shared/types/api'
+import type { DiscoveredUrl, Engine, SeverityCounts, SiteSnapshot } from '#shared/types/api'
 
 export const sites = sqliteTable('sites', {
   id: text('id').primaryKey(),
@@ -89,7 +89,32 @@ export const findings = sqliteTable(
     index('findings_scan_fp_idx').on(t.scanId, t.fingerprint),
   ],
 )
+/** A crawl-only job: finds URLs for the user to approve as saved targets.
+ * Deliberately separate from `scans` — it produces no findings, has no
+ * diff/history semantics, and must never show up in the scan list. */
+export const discoveries = sqliteTable(
+  'discoveries',
+  {
+    id: text('id').primaryKey(),
+    siteId: text('site_id')
+      .notNull()
+      .references(() => sites.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: ['queued', 'running', 'done', 'failed'] }).notNull(),
+    urls: text('urls', { mode: 'json' }).$type<DiscoveredUrl[]>().notNull(),
+    meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    warnings: text('warnings', { mode: 'json' }).$type<string[]>().notNull(),
+    error: text('error'),
+    createdAt: text('created_at').notNull(),
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
+  },
+  (t) => [
+    index('discoveries_site_created_idx').on(t.siteId, t.createdAt),
+    index('discoveries_status_idx').on(t.status),
+  ],
+)
 export type SiteRow = typeof sites.$inferSelect
+export type DiscoveryRow = typeof discoveries.$inferSelect
 export type ScanRow = typeof scans.$inferSelect
 export type EngineRunRow = typeof engineRuns.$inferSelect
 export type FindingRow = typeof findings.$inferSelect

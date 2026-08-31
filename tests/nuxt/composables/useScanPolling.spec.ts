@@ -222,6 +222,38 @@ describe('useScanPolling', () => {
     expect(calls).toBe(3)
   })
 
+  it('discards an in-flight result from a previous run after start() is called again', async () => {
+    // Run 1's request is left pending; start() begins run 2, whose request
+    // resolves first. When run 1's stale response finally arrives it must
+    // neither overwrite state nor schedule a second polling chain.
+    let calls = 0
+    const pending: Array<(value: ScanDetail) => void> = []
+    mockScanEndpoint(
+      () =>
+        new Promise<ScanDetail>((resolve) => {
+          calls++
+          pending.push(resolve)
+        }),
+    )
+
+    const polling = useScanPolling('scan-1', { intervalMs: 1000 })
+    polling.start()
+    await advance(0) // run 1 in flight
+    polling.start() // run 2
+    await advance(0) // run 2 in flight
+    expect(calls).toBe(2)
+
+    pending[1]?.(scanFixture({ status: 'done' })) // run 2 finishes → terminal
+    await advance(0)
+    expect(polling.done.value).toBe(true)
+
+    pending[0]?.(scanFixture({ status: 'running' })) // stale run 1 arrives late
+    await advance(0)
+    expect(polling.state.value?.status).toBe('done') // not overwritten
+    await advance(5000)
+    expect(calls).toBe(2) // no resurrected chain
+  })
+
   it('stops automatically when the owning component unmounts', async () => {
     let calls = 0
     mockScanEndpoint(() => {

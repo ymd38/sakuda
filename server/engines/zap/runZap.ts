@@ -22,6 +22,11 @@ export interface ZapRunInput {
   workDir: string
   planYaml: string
   replacerConf: string | null
+  /** Non-secret files to drop into `workDir` before the run (e.g. a script
+   * the plan references). Keys are file names relative to `workDir`. */
+  extraFiles?: Record<string, string>
+  /** File (relative to `workDir`) to read back after the run; defaults to the JSON report. */
+  reportFile?: string
   timeoutMs: number
   signal: AbortSignal
   logger: Logger
@@ -53,6 +58,8 @@ export async function runZap(i: ZapRunInput): Promise<ZapRunOutput> {
   await mkdir(zapHomeDir, { recursive: true })
   try {
     await writeFile(planFile, i.planYaml)
+    for (const [name, content] of Object.entries(i.extraFiles ?? {}))
+      await writeFile(join(i.workDir, name), content)
     const args = ['-dir', zapPath(i.env, i.workDir, 'zaphome'), '-cmd']
     if (i.replacerConf !== null) {
       // Header values must never be readable by anyone but this process: 0600,
@@ -78,7 +85,7 @@ export async function runZap(i: ZapRunInput): Promise<ZapRunOutput> {
       signal: i.signal,
       logger: i.logger,
     })
-    const reportJsonPath = join(i.workDir, ZAP_REPORT_JSON)
+    const reportJsonPath = join(i.workDir, i.reportFile ?? ZAP_REPORT_JSON)
     const reportText = existsSync(reportJsonPath) ? await readFile(reportJsonPath, 'utf8') : null
     return { result, reportJsonPath, reportText }
   } finally {

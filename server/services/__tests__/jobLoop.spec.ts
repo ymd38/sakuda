@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { openDatabase, type Db } from '../../db/client'
-import { scans } from '../../db/schema'
+import { discoveries, scans } from '../../db/schema'
 import { parseEnv, type Env } from '../../config/env'
 import { createHeaderCipher } from '../../domain/headerCipher'
-import type { EngineOutput, EngineRunner } from '../../engines/types'
+import type { DiscoverRunner, EngineOutput, EngineRunner } from '../../engines/types'
 import { logger } from '../../lib/logger'
 import { createSite, type SiteServiceDeps } from '../siteService'
 import { createScan } from '../scanService'
+import { createDiscovery } from '../discoveryService'
 import { createJobLoop } from '../jobLoop'
 import { SiteInputSchema } from '#shared/schemas/site'
 import { emptyCounts } from '#shared/utils/severity'
@@ -56,25 +57,28 @@ afterEach(async () => {
   await Promise.all(loops.map((l) => l.stop()))
 })
 
-function makeLoop(runners: Partial<Record<Engine, EngineRunner>>) {
+function makeLoop(runners: Partial<Record<Engine, EngineRunner>>, discover?: DiscoverRunner) {
   const full: Record<Engine, EngineRunner> = {
     nuclei: vi.fn(async () => successOutput()),
     'zap-api': vi.fn(async () => successOutput()),
     'zap-fe': vi.fn(async () => successOutput()),
     ...runners,
   }
+  const discoverFn: DiscoverRunner =
+    discover ?? vi.fn(async () => ({ urls: [], meta: {}, warnings: [], exitCode: 0, signal: null }))
   const loop = createJobLoop({
     db,
     env,
     cipher: siteDeps.cipher,
     runners: full,
+    discover: discoverFn,
     logger,
     now,
     id,
     pollMs: 10,
   })
   loops.push(loop)
-  return { loop, runners: full }
+  return { loop, runners: full, discover: discoverFn }
 }
 
 describe('createJobLoop', () => {
@@ -120,5 +124,31 @@ describe('createJobLoop', () => {
     const row = db.select().from(scans).where(eq(scans.id, scan.id)).get()
     expect(row?.status).toBe('failed')
     expect(row?.error).toBe('aborted: server shutting down')
+  })
+
+  it('picks up a queued discovery and finishes it', async () => {
+    const site = createSite(siteDeps, base)
+    const discovery = createDiscovery(db, { now, id }, site.id)
+    const discover: DiscoverRunner = vi.fn(async () => ({
+      urls: [{ url: 'http://localhost:3001/x', method: 'GET', statusCode: 200, source: 'spider' }],
+      meta: {},
+      warnings: [],
+      exitCode: 0,
+      signal: null,
+    }))
+    const { loop } = makeLoop({}, discover)
+
+    loop.start()
+    await vi.waitFor(
+      () => {
+        const row = db.select().from(discoveries).where(eq(discoveries.id, discovery.id)).get()
+        expect(row?.status).toBe('done')
+        expect(row?.urls).toHaveLength(1)
+      },
+      { timeout: 2000, interval: 5 },
+    )
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    await loop.stop()
   })
 })

@@ -91,6 +91,74 @@ describe('api e2e', () => {
     expect(res.status).toBe(409)
   })
 
+  it('POST /api/sites/:id/discoveries is rejected while a scan is active', async () => {
+    const res = await postJson(`/api/sites/${siteId}/discoveries`, {})
+    expect(res.status).toBe(409)
+  })
+
+  it('POST /api/sites/:id/targets appends new target lines, skipping ones already saved', async () => {
+    const res = await postJson(`/api/sites/${siteId}/targets`, {
+      lines: ['/', '/rest/products/search?q=', '/login'],
+    })
+    expect(res.status).toBe(200)
+    const body: unknown = await res.json()
+    expect(body).toMatchObject({
+      added: ['/rest/products/search?q=', '/login'],
+      skipped: ['/'],
+      site: { id: siteId, nucleiPaths: '/\n/rest/products/search?q=\n/login\n' },
+    })
+
+    const site = await fetch(`/api/sites/${siteId}`)
+    expect(await site.json()).toMatchObject({
+      nucleiPaths: '/\n/rest/products/search?q=\n/login\n',
+    })
+  })
+
+  it('POST /api/sites/:id/targets rejects invalid lines with 422 and changes nothing', async () => {
+    const res = await postJson(`/api/sites/${siteId}/targets`, {
+      lines: ['/ok', 'http://absolute.example/x'],
+    })
+    expect(res.status).toBe(422)
+    const site = await fetch(`/api/sites/${siteId}`)
+    expect(await site.json()).toMatchObject({
+      nucleiPaths: '/\n/rest/products/search?q=\n/login\n',
+    })
+  })
+
+  it('GET /api/sites/:id/discoveries lists nothing for a site that never discovered', async () => {
+    const res = await fetch(`/api/sites/${siteId}/discoveries`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([])
+  })
+
+  it('discovery flow on a fresh site: POST queues, GET detail reports queued, second POST is 409', async () => {
+    const created = await postJson('/api/sites', {
+      name: 'Discovery target',
+      frontBaseUrl: 'http://localhost:39993',
+    })
+    expect(created.status).toBe(201)
+    const otherSiteId = requireId(await created.json())
+
+    const res = await postJson(`/api/sites/${otherSiteId}/discoveries`, {})
+    expect(res.status).toBe(202)
+    const discovery: unknown = await res.json()
+    expect(discovery).toMatchObject({ siteId: otherSiteId, status: 'queued', urlCount: 0 })
+    const discoveryId = requireId(discovery)
+
+    const detail = await fetch(`/api/discoveries/${discoveryId}`)
+    expect(detail.status).toBe(200)
+    expect(await detail.json()).toMatchObject({ id: discoveryId, status: 'queued', urls: [] })
+
+    const list = await fetch(`/api/sites/${otherSiteId}/discoveries`)
+    expect(await list.json()).toMatchObject([{ id: discoveryId }])
+
+    expect((await postJson(`/api/sites/${otherSiteId}/discoveries`, {})).status).toBe(409)
+    // and a scan must wait for the discovery too
+    expect(
+      (await postJson(`/api/sites/${otherSiteId}/scans`, { engines: ['nuclei'] })).status,
+    ).toBe(409)
+  })
+
   it('POST /api/sites with a non-JSON content-type is rejected with 415 (I7)', async () => {
     const res = await fetch('/api/sites', {
       method: 'POST',

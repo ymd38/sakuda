@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import YAML from 'yaml'
-import { buildZapApiPlan, buildZapFePlan, planToYaml } from '../plan'
+import { buildZapApiPlan, buildZapDiscoverPlan, buildZapFePlan, planToYaml } from '../plan'
 
 describe('buildZapFePlan', () => {
   it('builds the Automation Framework plan for a ZAP FE spider+ajax scan', () => {
@@ -145,6 +145,64 @@ describe('buildZapApiPlan', () => {
         targetUrl: 'http://h:3000/api/',
         context: 'sakuda',
       },
+    })
+  })
+})
+
+describe('buildZapDiscoverPlan', () => {
+  it('builds a crawl-only plan: passive rules off, both spiders, script add + run, no report', () => {
+    const context = {
+      name: 'sakuda',
+      urls: ['http://h:3000/'],
+      includePaths: ['^http://h:3000(/.*)?$'],
+      excludePaths: [],
+    }
+    const plan = buildZapDiscoverPlan({
+      context,
+      seedUrl: 'http://h:3000/',
+      spiderMaxMinutes: 3,
+      ajaxMaxMinutes: 3,
+      scriptFile: '/zap/wrk/dump-site-tree.js',
+      scriptName: 'sakuda-dump-site-tree',
+      scriptEngine: 'ECMAScript : Graal.js',
+    })
+
+    expect(plan).toEqual({
+      env: {
+        contexts: [context],
+        parameters: { failOnError: false, failOnWarning: false, progressToStdout: true },
+      },
+      jobs: [
+        { type: 'passiveScan-config', parameters: { disableAllRules: true } },
+        {
+          type: 'spider',
+          parameters: { context: 'sakuda', url: 'http://h:3000/', maxDuration: 3 },
+        },
+        {
+          type: 'spiderAjax',
+          parameters: {
+            context: 'sakuda',
+            url: 'http://h:3000/',
+            maxDuration: 3,
+            numberOfBrowsers: 1,
+            browserId: 'firefox-headless',
+          },
+        },
+        {
+          type: 'script',
+          parameters: {
+            action: 'add',
+            type: 'standalone',
+            engine: 'ECMAScript : Graal.js',
+            name: 'sakuda-dump-site-tree',
+            file: '/zap/wrk/dump-site-tree.js',
+          },
+        },
+        {
+          type: 'script',
+          parameters: { action: 'run', type: 'standalone', name: 'sakuda-dump-site-tree' },
+        },
+      ],
     })
   })
 })

@@ -3,7 +3,9 @@ import ScanStatusBadge from '~/components/scan/ScanStatusBadge.vue'
 import SeverityStackChart from '~/components/chart/SeverityStackChart.vue'
 import EngineCountChart from '~/components/chart/EngineCountChart.vue'
 import DiffTrendChart from '~/components/chart/DiffTrendChart.vue'
+import DiscoveryPanel from '~/components/site/DiscoveryPanel.vue'
 import type { Engine, HistoryPoint, ScanSummary, SitePublic } from '#shared/types/api'
+import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
 
 const route = useRoute()
 // `route.params.id` is `string | string[]` generically; this route only has
@@ -24,9 +26,16 @@ const errorMessage = ref<string | null>(null)
 
 // nuclei always runs: with no paths configured it scans the base URL(s).
 const nucleiAvailable = computed(() => !!site.value)
-const nucleiScansRootOnly = computed(
-  () => !!site.value && parseNucleiPathLines(site.value.nucleiPaths).lines.length === 0,
+const savedTargetCount = computed(() =>
+  site.value ? parseNucleiPathLines(site.value.nucleiPaths).lines.length : 0,
 )
+const nucleiScansRootOnly = computed(() => !!site.value && savedTargetCount.value === 0)
+
+/** The discovery panel saves targets through its own endpoint and hands the
+ * updated site back, so the page reflects the new count without a refetch. */
+function handleTargetsSaved(updated: SitePublic) {
+  site.value = updated
+}
 const zapApiAvailable = computed(
   () => !!site.value && (!!site.value.openapiUrl || !!site.value.openapiJson),
 )
@@ -84,6 +93,21 @@ async function handleStartScan() {
         </div>
       </section>
 
+      <section class="card mt-6 flex flex-col gap-4" data-testid="targets-section">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="font-display text-heading-md uppercase">Targets</h2>
+          <p class="text-caption-md text-mute" data-testid="saved-target-count">
+            {{ savedTargetCount }} saved target path{{ savedTargetCount === 1 ? '' : 's' }}
+            <NuxtLink :to="`/sites/${siteId}/edit`" class="text-ink ml-2 underline">Edit</NuxtLink>
+          </p>
+        </div>
+        <p class="text-caption-sm text-mute">
+          Nuclei scans the saved target paths. Discover URLs with ZAP's spider, review them, and
+          save the ones you want scanned — you only need to discover again when the site changes.
+        </p>
+        <DiscoveryPanel :site="site" @saved="handleTargetsSaved" />
+      </section>
+
       <section class="card mt-6 flex flex-col gap-4">
         <h2 class="font-display text-heading-md uppercase">Start scan</h2>
 
@@ -99,16 +123,8 @@ async function handleStartScan() {
               {{ ENGINE_LABELS.nuclei }}
             </label>
             <p v-if="nucleiScansRootOnly" class="text-caption-sm text-mute mt-1">
-              No nuclei paths configured — scans the base URL only. Add paths in Edit to cover more
-              pages/endpoints.
-            </p>
-            <p
-              v-if="zapFeChecked && nucleiChecked"
-              data-testid="nuclei-crawled-hint"
-              class="text-caption-sm text-mute mt-1"
-            >
-              When ZAP frontend runs in the same scan, the URLs its spider reached are added to
-              nuclei's targets.
+              No target paths saved — nuclei scans the base URL only. Discover URLs below or add
+              paths in Edit to cover more pages/endpoints.
             </p>
           </div>
 

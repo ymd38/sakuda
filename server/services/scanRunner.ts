@@ -71,11 +71,6 @@ export async function runScan(
     const log = logger.child({ scanId, siteId: site.id })
     let doneCount = 0
     let failedCount = 0
-    // Populated from a successful zap-fe run in this same scan (if any) and
-    // handed to nuclei as extra targets, since zap-fe runs earlier in
-    // ENGINE_ORDER. Narrowed field-by-field (no `as` cast) since `meta` is
-    // untyped `Record<string, unknown>`.
-    let zapFeReachedUrls: string[] | undefined
     for (const engine of orderEngines(scan.engines)) {
       if (signal.aborted) {
         failedCount++
@@ -105,13 +100,7 @@ export async function runScan(
           env: deps.env,
           logger: log,
           signal,
-          ...(engine === 'nuclei' && zapFeReachedUrls ? { extraTargets: zapFeReachedUrls } : {}),
         })
-        if (engine === 'zap-fe') {
-          const reached = out.meta['reachedUrls']
-          if (Array.isArray(reached) && reached.every((u): u is string => typeof u === 'string'))
-            zapFeReachedUrls = reached
-        }
         db.transaction((tx) => {
           tx.update(engineRuns)
             .set({

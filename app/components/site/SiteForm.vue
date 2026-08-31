@@ -180,7 +180,7 @@ function handleSubmit() {
 
     <div class="flex flex-col gap-2">
       <label for="site-nuclei-paths" class="text-caption-md font-medium text-ink"
-        >Nuclei paths
+        >Target paths
         <span class="text-mute">(optional — empty scans the base URL only)</span></label
       >
       <textarea
@@ -193,8 +193,9 @@ function handleSubmit() {
       />
       <p class="text-caption-sm text-mute">
         The URLs Nuclei scans, one path per line, relative to the front base URL (prefix "api:" to
-        use the API base URL). Nuclei does not crawl — list the pages and endpoints you care about
-        (top page, login, API routes with query params). "#" starts a comment.
+        use the API base URL). Nuclei does not crawl — use "Discover URLs" on the site page to fill
+        this list from ZAP's spider, or hand-list the pages and endpoints you care about (top page,
+        login, API routes with query params). "#" starts a comment.
       </p>
     </div>
 

@@ -4,7 +4,9 @@ import { EnvError, getEnv } from '../config/env'
 import { closeDb, getDb } from '../db/client'
 import { createHeaderCipher } from '../domain/headerCipher'
 import { engineRunners } from '../engines'
+import { runZapDiscover } from '../engines/zap/zapDiscover'
 import { createJobLoop } from '../services/jobLoop'
+import { recoverInterruptedDiscoveries } from '../services/discoveryService'
 import { recoverInterruptedScans } from '../services/scanService'
 import { logger } from '../lib/logger'
 
@@ -20,10 +22,14 @@ export default defineNitroPlugin((nitroApp) => {
   }
 
   mkdirSync(env.scansDir, { recursive: true })
+  mkdirSync(env.discoveriesDir, { recursive: true })
   const db = getDb()
 
   const recovered = recoverInterruptedScans(db, () => new Date())
   if (recovered > 0) logger.warn({ recovered }, 'marked interrupted scans as failed')
+  const recoveredDiscoveries = recoverInterruptedDiscoveries(db, () => new Date())
+  if (recoveredDiscoveries > 0)
+    logger.warn({ recovered: recoveredDiscoveries }, 'marked interrupted discoveries as failed')
 
   if (!env.jobRunner) {
     logger.info('job runner disabled (SAKUDA_JOB_RUNNER=off)')
@@ -35,6 +41,7 @@ export default defineNitroPlugin((nitroApp) => {
     env,
     cipher: createHeaderCipher(env.encryptionKey),
     runners: engineRunners,
+    discover: runZapDiscover,
     logger,
     now: () => new Date(),
     id: randomUUID,

@@ -61,6 +61,8 @@ export interface Env {
   dataDir: string
   dbFile: string
   scansDir: string
+  /** Per-discovery work dirs (ZAP plan/logs/site-tree dump), sibling of `scansDir`. */
+  discoveriesDir: string
   migrationsDir: string
   localhostAlias: string | undefined
   nuclei: { bin: string; templatesDir: string; maxMinutes: number }
@@ -89,6 +91,7 @@ export function parseEnv(raw: NodeJS.ProcessEnv): Env {
     dataDir,
     dbFile: resolve(dataDir, 'sakuda.db'),
     scansDir: resolve(dataDir, 'scans'),
+    discoveriesDir: resolve(dataDir, 'discoveries'),
     migrationsDir: resolve(v.SAKUDA_MIGRATIONS_DIR),
     localhostAlias: v.SAKUDA_LOCALHOST_ALIAS,
     nuclei: {

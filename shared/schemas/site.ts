@@ -3,6 +3,11 @@ import { HeadersSchema } from './headers'
 import { siteRequiresConfirmation } from '../utils/localHost'
 import { parseNucleiPathLines } from '../utils/nucleiPaths'
 
+/** Upper bound of the saved target list; `addSiteTargets` enforces the same
+ * limit so a discovery save can never leave the site un-editable through
+ * the form (which validates against this schema). */
+export const NUCLEI_PATHS_MAX_CHARS = 20_000
+
 const emptyToNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v)
 const HttpUrl = z
   .url({ protocol: /^https?$/, error: 'must be an http(s) URL' })
@@ -14,7 +19,7 @@ export const SiteInputSchema = z
     name: z.string().trim().min(1).max(100),
     frontBaseUrl: HttpUrl,
     apiBaseUrl: OptionalHttpUrl,
-    nucleiPaths: z.string().max(20_000).default(''),
+    nucleiPaths: z.string().max(NUCLEI_PATHS_MAX_CHARS).default(''),
     openapiUrl: OptionalHttpUrl,
     openapiJson: z.preprocess(emptyToNull, z.string().max(5_000_000).nullable()).default(null),
     zapFeSeedPath: z

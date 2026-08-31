@@ -25,6 +25,17 @@ export interface ZapApiPlanInput {
   reportDir: string
 }
 
+export interface ZapDiscoverPlanInput {
+  context: ZapContext
+  seedUrl: string
+  spiderMaxMinutes: number
+  ajaxMaxMinutes: number
+  /** Container-side path of the site-tree dump script (see `siteTreeDump.ts`). */
+  scriptFile: string
+  scriptName: string
+  scriptEngine: string
+}
+
 export const ZAP_REPORT_JSON = 'report.json'
 export const ZAP_REPORT_HTML = 'report.html'
 
@@ -65,6 +76,43 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
       },
       { type: 'passiveScan-wait', parameters: { maxDuration: i.passiveMaxMinutes } },
       ...reportJobs(i.reportDir),
+    ],
+  }
+}
+
+/** Crawl-only plan: spider + Ajax spider, every passive rule disabled (no
+ * alerts wanted, and it keeps the run cheap), then a standalone script job
+ * that dumps the site tree. No report job — the dump *is* the output. */
+export function buildZapDiscoverPlan(i: ZapDiscoverPlanInput): Record<string, unknown> {
+  return {
+    env: envFor(i.context),
+    jobs: [
+      { type: 'passiveScan-config', parameters: { disableAllRules: true } },
+      {
+        type: 'spider',
+        parameters: { context: i.context.name, url: i.seedUrl, maxDuration: i.spiderMaxMinutes },
+      },
+      {
+        type: 'spiderAjax',
+        parameters: {
+          context: i.context.name,
+          url: i.seedUrl,
+          maxDuration: i.ajaxMaxMinutes,
+          numberOfBrowsers: 1,
+          browserId: 'firefox-headless',
+        },
+      },
+      {
+        type: 'script',
+        parameters: {
+          action: 'add',
+          type: 'standalone',
+          engine: i.scriptEngine,
+          name: i.scriptName,
+          file: i.scriptFile,
+        },
+      },
+      { type: 'script', parameters: { action: 'run', type: 'standalone', name: i.scriptName } },
     ],
   }
 }

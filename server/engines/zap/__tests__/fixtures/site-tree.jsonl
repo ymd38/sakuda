@@ -1,0 +1,13 @@
+{"method":"GET","url":"http://host.docker.internal:3000","type":0,"status":0}
+{"method":"GET","url":"http://host.docker.internal:3000/","type":2,"status":200}
+{"method":"GET","url":"http://host.docker.internal:3000/api","type":0,"status":0}
+{"method":"GET","url":"http://host.docker.internal:3000/api/Challenges/?name=Score%20Board","type":2,"status":200}
+{"method":"GET","url":"http://host.docker.internal:3000/rest/products/search?q=","type":10,"status":200}
+{"method":"GET","url":"http://host.docker.internal:3000/rest/basket/6","type":10,"status":401}
+{"method":"GET","url":"http://host.docker.internal:3000/main.js","type":2,"status":200}
+{"method":"GET","url":"http://host.docker.internal:3000/socket.io/?EIO=4&transport=polling&t=Q1Ld3bH","type":10,"status":200}
+{"method":"GET","url":"http://host.docker.internal:3000/juice-shop/build/routes/fileServer.js:69:18","type":2,"status":200}
+{"method":"GET","url":"http://host.docker.internal:3000/rest/products/search?q=","type":2,"status":200}
+{"method":"GET","url":"http://host.docker.internal:3000/admin/config","type":2,"status":200}
+{"method":"GET","url":"http://other.example/leak","type":2,"status":200}
+not json at all

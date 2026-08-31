@@ -7,6 +7,7 @@ import { engineRuns, scans, sites } from '../../db/schema'
 import { createHeaderCipher } from '../../domain/headerCipher'
 import { toSitePublic, toSiteSnapshot } from '../../domain/siteView'
 import { createSite, type SiteServiceDeps } from '../siteService'
+import { createDiscovery } from '../discoveryService'
 import { ServiceError } from '../errors'
 import {
   claimNextQueuedScan,
@@ -126,6 +127,16 @@ describe('createScan', () => {
     const site = createSite(siteDeps, base)
     createScan(db, { now, id }, site.id, ['nuclei'])
     expectServiceError(() => createScan(db, { now, id }, site.id, ['nuclei']), 409, 'SCAN_ACTIVE')
+  })
+
+  it('rejects a scan while a discovery is queued/running with 409 DISCOVERY_ACTIVE', () => {
+    const site = createSite(siteDeps, base)
+    createDiscovery(db, { now, id }, site.id)
+    expectServiceError(
+      () => createScan(db, { now, id }, site.id, ['nuclei']),
+      409,
+      'DISCOVERY_ACTIVE',
+    )
   })
 
   it('422 NON_LOCAL_UNCONFIRMED for a non-local site inserted without confirmation', () => {

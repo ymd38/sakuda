@@ -9,9 +9,15 @@ import { join } from 'node:path'
  * runZap sets, records the `replacer.conf` file mode when present (0600 is
  * asserted by the caller), and copies `fixturePath` to `report.json` unless
  * `FAKE_ZAP_NO_REPORT=1` is set in the test process's env (inherited by the
- * spawned child).
+ * spawned child). `outputFile` lets discovery specs have it produce the
+ * site-tree dump instead of a report.
  */
-export function writeFakeZap(dir: string, fixturePath: string, name = 'fake-zap.js'): string {
+export function writeFakeZap(
+  dir: string,
+  fixturePath: string,
+  name = 'fake-zap.js',
+  outputFile = 'report.json',
+): string {
   const script = `#!/usr/bin/env node
 const fs = require('node:fs')
 const path = require('node:path')
@@ -32,7 +38,7 @@ if (fs.existsSync(confFile)) {
   )
 }
 if (process.env.FAKE_ZAP_NO_REPORT !== '1') {
-  fs.copyFileSync(${JSON.stringify(fixturePath)}, path.join(hostWorkDir, 'report.json'))
+  fs.copyFileSync(${JSON.stringify(fixturePath)}, path.join(hostWorkDir, ${JSON.stringify(outputFile)}))
 }
 process.exit(0)
 `

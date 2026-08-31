@@ -1,6 +1,6 @@
 import type { Logger } from '../lib/logger'
 import type { SiteWithHeaders } from '../services/siteService'
-import type { Engine, Severity, SeverityCounts } from '#shared/types/api'
+import type { DiscoveredUrl, Engine, Severity, SeverityCounts } from '#shared/types/api'
 import type { Env } from '../config/env'
 
 export interface NewFinding {
@@ -26,9 +26,6 @@ export interface EngineInput {
   env: Env
   logger: Logger
   signal: AbortSignal
-  /** Absolute URLs reached by an earlier zap-fe run in the same scan, offered
-   * as additional targets (currently consumed by nuclei). */
-  extraTargets?: string[]
 }
 
 export interface EngineOutput {
@@ -41,6 +38,26 @@ export interface EngineOutput {
 }
 
 export type EngineRunner = (input: EngineInput) => Promise<EngineOutput>
+
+/** Input to a discovery (crawl-only) run — see `services/discoveryRunner`. */
+export interface DiscoverInput {
+  discoveryId: string
+  site: SiteWithHeaders
+  workDir: string
+  env: Env
+  logger: Logger
+  signal: AbortSignal
+}
+
+export interface DiscoverOutput {
+  urls: DiscoveredUrl[]
+  meta: Record<string, unknown>
+  warnings: string[]
+  exitCode: number | null
+  signal: string | null
+}
+
+export type DiscoverRunner = (input: DiscoverInput) => Promise<DiscoverOutput>
 
 export class EngineError extends Error {
   constructor(

@@ -5,10 +5,15 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
+import { eq } from 'drizzle-orm'
 import { openDatabase } from '../../db/client'
+import { scans } from '../../db/schema'
 import { createHeaderCipher } from '../../domain/headerCipher'
 import { createScan } from '../scanService'
+import { ServiceError } from '../errors'
+import { createDiscovery } from '../discoveryService'
 import {
+  addSiteTargets,
   createSite,
   deleteSite,
   getSite,
@@ -71,7 +76,7 @@ describe('siteService', () => {
     expect(() => updateSite(deps, 'nope', base)).toThrow(/not found/)
   })
 
-  it('deleting a site best-effort removes its scans artifact directories (I5)', async () => {
+  it('deleting a site best-effort removes its scan and discovery artifact directories (I5)', async () => {
     const s = createSite(deps, base)
     const scan = createScan(deps.db, { now: deps.now, id: deps.id }, s.id, ['nuclei'])
     const scansDir = mkdtempSync(join(tmpdir(), 'sakuda-scans-'))
@@ -80,9 +85,18 @@ describe('siteService', () => {
     writeFileSync(join(scanDir, 'nuclei', 'findings.jsonl'), '{}')
     const logger = pino({ level: 'silent' })
 
-    expect(await deleteSite(deps.db, s.id, { scansDir, logger })).toBe(true)
+    // one job at a time per site: finish the scan before queueing a discovery
+    deps.db.update(scans).set({ status: 'done' }).where(eq(scans.id, scan.id)).run()
+    const discovery = createDiscovery(deps.db, { now: deps.now, id: deps.id }, s.id)
+    const discoveriesDir = mkdtempSync(join(tmpdir(), 'sakuda-discoveries-'))
+    const discoveryDir = join(discoveriesDir, discovery.id)
+    mkdirSync(discoveryDir, { recursive: true })
+    writeFileSync(join(discoveryDir, 'site-tree.jsonl'), '')
+
+    expect(await deleteSite(deps.db, s.id, { scansDir, discoveriesDir, logger })).toBe(true)
 
     expect(existsSync(scanDir)).toBe(false)
+    expect(existsSync(discoveryDir)).toBe(false)
   })
 
   it('deleting a site logs (never throws) when an artifact directory cannot be removed', async () => {
@@ -101,7 +115,77 @@ describe('siteService', () => {
     writeFileSync(join(notADir, 'blocker'), '')
     const scansDir = join(notADir, 'blocker')
 
-    await expect(deleteSite(deps.db, s.id, { scansDir, logger })).resolves.toBe(true)
+    await expect(
+      deleteSite(deps.db, s.id, { scansDir, discoveriesDir: scansDir, logger }),
+    ).resolves.toBe(true)
     expect(warned).toBe(true)
+  })
+
+  describe('addSiteTargets', () => {
+    it('appends new lines, skips duplicates, and bumps updatedAt', () => {
+      const s = createSite(deps, base) // nucleiPaths: '/\n/api/products'
+      deps.now = () => new Date('2026-02-01T00:00:00Z')
+      const r = addSiteTargets(deps, s.id, [
+        '/api/products',
+        '/login',
+        'api:/v1'.replace('api:', ''),
+      ])
+      expect(r.added).toEqual(['/login', '/v1'])
+      expect(r.skipped).toEqual(['/api/products'])
+      expect(r.site.nucleiPaths).toBe('/\n/api/products\n/login\n/v1\n')
+      expect(r.site.updatedAt).toBe('2026-02-01T00:00:00.000Z')
+      expect(getSite(deps.db, s.id)?.nucleiPaths).toBe('/\n/api/products\n/login\n/v1\n')
+    })
+
+    it('is a no-op (no updatedAt bump) when every line is already present', () => {
+      const s = createSite(deps, base)
+      deps.now = () => new Date('2026-02-01T00:00:00Z')
+      const r = addSiteTargets(deps, s.id, ['/'])
+      expect(r.added).toEqual([])
+      expect(r.site.updatedAt).toBe(s.updatedAt)
+    })
+
+    it('rejects invalid lines with 422 and writes nothing', () => {
+      const s = createSite(deps, base)
+      expect(() => addSiteTargets(deps, s.id, ['/ok', 'http://x.example/abs'])).toThrow(
+        ServiceError,
+      )
+      try {
+        addSiteTargets(deps, s.id, ['/ok', 'http://x.example/abs'])
+      } catch (e) {
+        if (!(e instanceof ServiceError)) throw e
+        expect(e.statusCode).toBe(422)
+        expect(e.details).toEqual({ invalid: ['http://x.example/abs'] })
+      }
+      expect(getSite(deps.db, s.id)?.nucleiPaths).toBe(base.nucleiPaths)
+    })
+
+    it('rejects api: lines when the site has no apiBaseUrl', () => {
+      const s = createSite(deps, base)
+      expect(() => addSiteTargets(deps, s.id, ['api:/v1/users'])).toThrow(/apiBaseUrl/)
+      expect(
+        addSiteTargets(
+          deps,
+          createSite(deps, { ...base, apiBaseUrl: 'http://localhost:8080' }).id,
+          ['api:/v1/users'],
+        ).added,
+      ).toEqual(['api:/v1/users'])
+    })
+
+    it('rejects a save that would push nucleiPaths over the site schema limit (site stays editable)', () => {
+      const s = createSite(deps, base)
+      const huge = Array.from({ length: 400 }, (_, i) => `/p${i}/${'x'.repeat(60)}`)
+      expect(() => addSiteTargets(deps, s.id, huge)).toThrow(/over the 20000 limit/)
+      expect(getSite(deps.db, s.id)?.nucleiPaths).toBe(base.nucleiPaths)
+      // the form's schema must still accept the untouched site
+      expect(
+        SiteInputSchema.safeParse({ ...base, nucleiPaths: getSite(deps.db, s.id)?.nucleiPaths })
+          .success,
+      ).toBe(true)
+    })
+
+    it('throws 404 for an unknown site', () => {
+      expect(() => addSiteTargets(deps, 'nope', ['/'])).toThrow(/not found/)
+    })
   })
 })

@@ -2,29 +2,14 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
-import { expandNucleiTargets, mergeCrawledTargets } from '../../domain/nucleiTargets'
+import { expandNucleiTargets } from '../../domain/nucleiTargets'
 import { runCommand } from '../runCommand'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildNucleiArgs, nucleiTagsFor } from './args'
 import { normalizeNucleiLines, parseNucleiJsonl, parseNucleiStats } from './normalize'
 
-export const runNuclei: EngineRunner = async ({
-  scanId,
-  site,
-  workDir,
-  env,
-  logger,
-  signal,
-  extraTargets,
-}) => {
-  const expanded = expandNucleiTargets(site)
-  const { urls, dropped: crawledDropped } = mergeCrawledTargets(
-    site,
-    expanded.urls,
-    extraTargets ?? [],
-  )
-  const excluded = expanded.excluded
-  const crawledTargetCount = urls.length - expanded.urls.length
+export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
+  const { urls, excluded } = expandNucleiTargets(site)
   if (urls.length === 0)
     throw new EngineError('nuclei: no target URLs (nucleiPaths is empty or every path is excluded)')
   const originalHost = new URL(site.frontBaseUrl).hostname
@@ -51,19 +36,11 @@ export const runNuclei: EngineRunner = async ({
       engine: 'nuclei',
       urlCount: urls.length,
       excludedCount: excluded.length,
-      crawledTargetCount,
-      crawledDropped,
       tags,
       rateLimit: site.nucleiRateLimit,
       headerNames: site.headerNames,
     },
     'nuclei start',
-  )
-  // Never log the crawled URLs themselves at info level (they may carry
-  // query strings with sensitive values) — counts only above.
-  logger.debug(
-    { scanId, engine: 'nuclei', extraTargets: extraTargets ?? [] },
-    'nuclei extra targets',
   )
   const stdoutPath = join(workDir, 'stdout.log')
   const stderrPath = join(workDir, 'stderr.log')
@@ -111,8 +88,6 @@ export const runNuclei: EngineRunner = async ({
     meta: {
       urlCount: urls.length,
       excludedUrls: excluded,
-      crawledTargetCount,
-      crawledDropped,
       tags,
       rateLimit: site.nucleiRateLimit,
       concurrency: 25,

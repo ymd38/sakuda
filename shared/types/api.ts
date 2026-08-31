@@ -97,6 +97,36 @@ export interface HistoryPoint {
   engines: Partial<Record<Engine, SeverityCounts>>
   diff: { new: number; persisting: number; resolved: number } | null
 }
+/** One URL found by a discovery crawl, after normalization (same origin,
+ * fragment stripped, assets/noise/excluded paths removed). */
+export interface DiscoveredUrl {
+  url: string
+  method: string
+  statusCode: number
+  /** Which ZAP crawler first reached it. */
+  source: 'spider' | 'ajax' | 'other'
+}
+export type DiscoveryStatus = ScanStatus
+export interface DiscoverySummary {
+  id: string
+  siteId: string
+  status: DiscoveryStatus
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  error: string | null
+  urlCount: number
+}
+export interface DiscoveryDetail extends DiscoverySummary {
+  urls: DiscoveredUrl[]
+  meta: Record<string, unknown>
+  warnings: string[]
+}
+export interface AddTargetsResult {
+  site: SitePublic
+  added: string[]
+  skipped: string[]
+}
 export interface ApiErrorData {
   code?: string
   issues?: string[]

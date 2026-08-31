@@ -1,14 +1,14 @@
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { engineRuns, scans, sites, type ScanRow } from '../db/schema'
 import { toSitePublic, toSiteSnapshot } from '../domain/siteView'
 import { orderEngines } from '../engines'
+import { hasActiveDiscovery, hasActiveScan } from './activeJobs'
 import { ServiceError } from './errors'
 import type { Engine, ScanSummary, SeverityCounts } from '#shared/types/api'
 import { addCounts, emptyCounts } from '#shared/utils/severity'
 
 const RESTART_ERROR = 'server restarted while the scan was running'
-const ACTIVE_STATUSES = ['queued', 'running'] as const
 
 export function toScanSummary(row: ScanRow, counts: SeverityCounts): ScanSummary {
   return {
@@ -88,13 +88,14 @@ export function createScan(
     site.openapiUrl !== null || site.openapiJson !== null,
   )
 
-  const active = db
-    .select({ id: scans.id })
-    .from(scans)
-    .where(and(eq(scans.siteId, siteId), inArray(scans.status, [...ACTIVE_STATUSES])))
-    .get()
-  if (active)
+  if (hasActiveScan(db, siteId))
     throw new ServiceError(409, 'SCAN_ACTIVE', `site ${siteId} already has an active scan`)
+  if (hasActiveDiscovery(db, siteId))
+    throw new ServiceError(
+      409,
+      'DISCOVERY_ACTIVE',
+      `site ${siteId} has an active discovery; wait for it to finish`,
+    )
 
   const id = deps.id()
   const createdAt = deps.now().toISOString()
