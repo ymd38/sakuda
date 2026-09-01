@@ -17,7 +17,7 @@ const { data: site, error: siteError } = await useFetch<SitePublic>(`/api/sites/
 const { data: scans } = await useFetch<ScanSummary[]>(`/api/sites/${siteId}/scans`)
 const { data: history } = await useFetch<HistoryPoint[]>(`/api/sites/${siteId}/history`)
 
-const nucleiChecked = ref(false)
+const nucleiChecked = ref(true)
 const zapApiChecked = ref(false)
 const zapFeChecked = ref(true)
 
