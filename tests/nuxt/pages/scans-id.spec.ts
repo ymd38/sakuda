@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import ScanPage from '~/pages/scans/[id].vue'
 import { engineRunFixture, findingFixture, scanDetailFixture } from '../helpers/fixtures'
 import type { ScanDetail } from '#shared/types/api'
@@ -14,6 +14,11 @@ const polling = {
 }
 
 mockNuxtImport('useScanPolling', () => () => polling)
+
+// The header switcher reads the active site from useActiveSiteId(); mock it so
+// the page's publish/clear watcher can be asserted directly.
+const activeSiteId = ref<string | null>(null)
+mockNuxtImport('useActiveSiteId', () => () => activeSiteId)
 
 const ROUTE = '/scans/scan-1'
 
@@ -31,6 +36,7 @@ describe('pages/scans/[id]', () => {
     polling.state.value = null
     polling.done.value = false
     polling.error.value = null
+    activeSiteId.value = null
   })
 
   afterEach(() => {
@@ -41,6 +47,18 @@ describe('pages/scans/[id]', () => {
   it('starts polling on mount', async () => {
     await mountPage()
     expect(polling.start).toHaveBeenCalled()
+  })
+
+  it('publishes the scan siteId to the header active-site state and clears it when the scan is unavailable', async () => {
+    polling.state.value = scanDetailFixture({ siteId: 'site-42' })
+    await mountPage()
+    expect(activeSiteId.value).toBe('site-42')
+
+    // A failed reload / in-flight navigation drops the scan — the header must
+    // not keep showing the previous site.
+    polling.state.value = null
+    await nextTick()
+    expect(activeSiteId.value).toBeNull()
   })
 
   it('shows ScanProgress while the scan is queued or running', async () => {

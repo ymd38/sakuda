@@ -2,7 +2,7 @@
 import ScanStatusBadge from '~/components/scan/ScanStatusBadge.vue'
 import type { SiteListItem } from '#shared/types/api'
 
-const { data: sites } = await useFetch<SiteListItem[]>('/api/sites')
+const { data: sites } = await useFetch<SiteListItem[]>('/api/sites', { key: 'sites-list' })
 </script>
 
 <template>

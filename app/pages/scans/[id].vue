@@ -14,6 +14,17 @@ const scanId = Array.isArray(rawScanId) ? (rawScanId[0] ?? '') : (rawScanId ?? '
 
 const { state, error, start } = useScanPolling(scanId)
 
+// The header site switcher reads the active site from a shared state; the
+// scan route has no siteId in its path, so publish it once the scan loads.
+const activeSiteId = useActiveSiteId()
+watch(
+  () => state.value?.siteId ?? null,
+  (id) => {
+    activeSiteId.value = id
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
   start()
 })
