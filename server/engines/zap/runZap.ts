@@ -22,6 +22,11 @@ export interface ZapRunInput {
   workDir: string
   planYaml: string
   replacerConf: string | null
+  /** Non-secret ZAP config values, passed as `-config key=value` (e.g. the
+   * Selenium add-on's Firefox prefs). Keys are ZAP config paths. Secret
+   * values must go through `replacerConf` / `secretFiles` instead — argv is
+   * visible to every process in the container. */
+  config?: Record<string, string>
   /** Non-secret files to drop into `workDir` before the run (e.g. a script
    * the plan references). Keys are file names relative to `workDir`. */
   extraFiles?: Record<string, string>
@@ -67,6 +72,8 @@ export async function runZap(i: ZapRunInput): Promise<ZapRunOutput> {
     for (const [name, content] of Object.entries(i.secretFiles ?? {}))
       await writeFile(join(i.workDir, name), content, { mode: 0o600 })
     const args = ['-dir', zapPath(i.env, i.workDir, 'zaphome'), '-cmd']
+    for (const [key, value] of Object.entries(i.config ?? {}))
+      args.push('-config', `${key}=${value}`)
     if (i.replacerConf !== null) {
       // Header values must never be readable by anyone but this process: 0600,
       // and removed in `finally` below regardless of how the run ends. Both

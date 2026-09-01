@@ -10,6 +10,7 @@ import {
   buildBrowserStorageScript,
 } from './browserStorageScript'
 import { buildZapDiscoverPlan, planToYaml } from './plan'
+import { buildFirefoxPrefsConfig } from './firefoxPrefs'
 import { buildReplacerConf } from './replacer'
 import { runZap, zapPath } from './runZap'
 import {
@@ -91,6 +92,7 @@ export const runZapDiscover: DiscoverRunner = async ({
     workDir,
     planYaml: planToYaml(plan),
     replacerConf: site.headers.length ? buildReplacerConf(site.headers) : null,
+    config: buildFirefoxPrefsConfig(alias),
     extraFiles: {
       [SITE_TREE_DUMP_SCRIPT_FILE]: buildSiteTreeDumpScript(
         zapPath(env, workDir, SITE_TREE_DUMP_OUTPUT_FILE),

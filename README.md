@@ -69,7 +69,12 @@ Override per invocation with `make up SAKUDA_PORT=3005`.
   `http://localhost:PORT` (or `127.0.0.1`), sakuda automatically rewrites it
   to `host.docker.internal` for engines running inside the container — no
   extra configuration needed, as long as the container was started with
-  `--add-host=host.docker.internal:host-gateway` (as above).
+  `--add-host=host.docker.internal:host-gateway` (as above). The Firefox that
+  ZAP's Ajax spider drives is also told to treat that alias as a **secure
+  context** (`dom.securecontext.allowlist`): a plain-http, non-localhost
+  origin has no `crypto.randomUUID` / `crypto.subtle` / service workers, and
+  an SPA that touches one of them while bootstrapping auth would otherwise
+  fail silently and crawl as an anonymous visitor.
 
 ## Environment variables
 
@@ -85,7 +90,7 @@ Override per invocation with `make up SAKUDA_PORT=3005`.
 | `SAKUDA_ZAP_WORKDIR`          | _(unset)_                                                 | Container-side path when ZAP sees the scan work dir at a different path than the host (the dev wrapper mounts it at `/zap/wrk`). |
 | `SAKUDA_ZAP_MAX_HEAP`         | `1024m`                                                   | `-Xmx` passed to ZAP via `JAVA_TOOL_OPTIONS`.                                                                                    |
 | `SAKUDA_LOCALHOST_ALIAS`      | _(unset)_                                                 | Rewrites `localhost`/`127.0.0.1` in target URLs for all engines.                                                                 |
-| `SAKUDA_ZAP_LOCALHOST_ALIAS`  | `host.docker.internal`                                    | Same, for ZAP only (falls back to `SAKUDA_LOCALHOST_ALIAS`).                                                                     |
+| `SAKUDA_ZAP_LOCALHOST_ALIAS`  | `host.docker.internal`                                    | Same, for ZAP only (falls back to `SAKUDA_LOCALHOST_ALIAS`). ZAP's Firefox treats this host as a secure context.                 |
 | `SAKUDA_ENGINE_GRACE_MINUTES` | `10`                                                      | Grace period before an orphaned engine process is treated as failed.                                                             |
 | `SAKUDA_JOB_RUNNER`           | `on`                                                      | Set `off` to disable the in-process scan queue (e.g. in tests).                                                                  |
 | `LOG_LEVEL`                   | `info`                                                    | `debug` \| `info` \| `warn` \| `error`.                                                                                          |

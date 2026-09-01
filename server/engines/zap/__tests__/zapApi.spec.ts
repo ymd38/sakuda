@@ -127,6 +127,9 @@ describe('runZapApi', () => {
     const openapiJob = jobs.find((j) => j.type === 'openapi')
     expect(openapiJob?.parameters.apiUrl).toBe('http://host.docker.internal:3000/openapi.json')
     expect(out.meta.openapiSource).toBe('url')
+    // No browser is launched for an API scan, so no Firefox pref (-config) is passed.
+    const argv = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8')) as string[]
+    expect(argv).not.toContain('-config')
   })
 
   it('throws EngineError when zap.sh produces no report', async () => {

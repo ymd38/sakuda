@@ -136,6 +136,55 @@ describe('runZapDiscover', () => {
     expect(existsSync(join(workDir, 'replacer.conf'))).toBe(false)
   })
 
+  it("tells the Ajax spider's Firefox to treat the localhost alias as a secure context", async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+      SAKUDA_LOCALHOST_ALIAS: 'host.docker.internal',
+    })
+    const workDir = join(tmp, 'work')
+
+    await runZapDiscover({
+      discoveryId: 'disc-1',
+      site: baseSite(),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const argv = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8')) as string[]
+    expect(argv.filter((a) => a.startsWith('selenium.firefoxPrefs.'))).toEqual([
+      'selenium.firefoxPrefs.pref(0).name=dom.securecontext.allowlist',
+      'selenium.firefoxPrefs.pref(0).value=host.docker.internal',
+      'selenium.firefoxPrefs.pref(0).enabled=true',
+    ])
+  })
+
+  it('sets no Firefox pref when no localhost alias is configured', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+
+    await runZapDiscover({
+      discoveryId: 'disc-1',
+      site: baseSite(),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const argv = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8')) as string[]
+    expect(argv).not.toContain('-config')
+  })
+
   it('also scopes the crawl to the api base URL when one is set', async () => {
     const fakeBin = writeFakeZap(tmp, FIXTURE, 'fake-zap.js', 'site-tree.jsonl')
     const env: Env = parseEnv({

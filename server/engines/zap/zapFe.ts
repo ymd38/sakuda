@@ -3,6 +3,7 @@ import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../doma
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildZapFePlan, planToYaml, ZAP_REPORT_JSON } from './plan'
+import { buildFirefoxPrefsConfig } from './firefoxPrefs'
 import { buildReplacerConf } from './replacer'
 import { normalizeZapReport, parseZapReport } from './report'
 import { runZap, zapPath } from './runZap'
@@ -62,6 +63,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     workDir,
     planYaml: planToYaml(plan),
     replacerConf: site.headers.length ? buildReplacerConf(site.headers) : null,
+    config: buildFirefoxPrefsConfig(alias),
     ...(hasBrowserStorage
       ? {
           secretFiles: {

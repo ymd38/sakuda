@@ -89,6 +89,38 @@ describe('runZap', () => {
     ])
   })
 
+  it('passes config entries as -config key=value pairs, in insertion order, before -autorun', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env = makeEnv({ SAKUDA_ZAP_WORKDIR: '/zap/wrk' }, fakeBin)
+    await runZap({
+      label: 'zap-test',
+      env,
+      workDir,
+      planYaml: 'plan: yes\n',
+      replacerConf: null,
+      config: {
+        'selenium.firefoxPrefs.pref(0).name': 'dom.securecontext.allowlist',
+        'selenium.firefoxPrefs.pref(0).value': 'host.docker.internal',
+      },
+      timeoutMs: 5000,
+      signal: new AbortController().signal,
+      logger,
+    })
+
+    const argv: unknown = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8'))
+    expect(argv).toEqual([
+      '-dir',
+      '/zap/wrk/zaphome',
+      '-cmd',
+      '-config',
+      'selenium.firefoxPrefs.pref(0).name=dom.securecontext.allowlist',
+      '-config',
+      'selenium.firefoxPrefs.pref(0).value=host.docker.internal',
+      '-autorun',
+      '/zap/wrk/plan.yaml',
+    ])
+  })
+
   it('uses host paths in argv when env.zap.workDir is unset', async () => {
     const fakeBin = writeFakeZap(tmp, FIXTURE)
     const env = makeEnv({}, fakeBin)
