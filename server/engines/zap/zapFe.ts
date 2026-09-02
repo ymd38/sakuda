@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { isActiveScanEnabled } from '../../domain/activeScan'
 import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
@@ -22,6 +23,11 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   const excludeRegexes = parseExcludePatterns(site.excludePaths).map(toZapExcludeRegex)
   const passiveMaxMinutes = 5
   const hasBrowserStorage = site.browserStorage.length > 0
+  // The single source of truth for "may this scan attack the target" —
+  // never decided here, only read (see domain/activeScan). The cap reuses the
+  // site's ZAP API limit: it is the one active-scan budget the site defines.
+  const activeScan = isActiveScanEnabled(site)
+  const activeScanMaxMinutes = activeScan ? site.zapApiMaxMinutes : 0
   const plan = buildZapFePlan({
     context: {
       name: 'sakuda',
@@ -42,6 +48,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
     ajaxMaxMinutes: site.zapFeSpiderMaxMinutes,
     passiveMaxMinutes,
+    ...(activeScan ? { activeScan: { maxScanMinutes: activeScanMaxMinutes } } : {}),
     reportDir: zapPath(env, workDir, '') + '/',
   })
   logger.info(
@@ -50,13 +57,19 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       engine: 'zap-fe',
       seedUrl: joinUrl(site.frontBaseUrl, site.zapFeSeedPath),
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
+      activeScan,
+      activeScanMaxMinutes,
       headerNames: site.headerNames,
       browserStorageNames: site.browserStorageNames,
     },
     'zap-fe start',
   )
   const timeoutMs =
-    (site.zapFeSpiderMaxMinutes * 2 + passiveMaxMinutes + env.engineGraceMinutes) * 60_000
+    (site.zapFeSpiderMaxMinutes * 2 +
+      activeScanMaxMinutes +
+      passiveMaxMinutes +
+      env.engineGraceMinutes) *
+    60_000
   const run = await runZap({
     label: `zap-fe:${scanId}`,
     env,
@@ -113,6 +126,8 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       spider: 'traditional + ajax',
       browserStorage: site.browserStorageNames.map((n) => `${n.kind}:${n.name}`),
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
+      activeScan,
+      ...(activeScan ? { activeScanMaxMinutes } : {}),
       reachedUrlCount: n.reachedUrls.length,
       reachedUrls: n.reachedUrls.slice(0, 200),
       authFailureCount: n.authFailureCount,

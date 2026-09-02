@@ -86,6 +86,82 @@ describe('runZapFe', () => {
       .jobs
     const spider = jobs.find((j) => j.type === 'spider')
     expect(spider?.parameters.url).toBe('http://host.docker.internal:3000/')
+    // default: passive only — no activeScan job, and the report says so
+    expect(jobs.some((j) => j.type === 'activeScan')).toBe(false)
+    expect(out.meta.activeScan).toBe(false)
+    expect(out.meta).not.toHaveProperty('activeScanMaxMinutes')
+  })
+
+  // as: plan.yaml is Record<string, unknown> at runtime; narrow just enough to list the jobs
+  const readPlanJobs = (workDir: string) =>
+    (
+      YAML.parse(readFileSync(join(workDir, 'plan.yaml'), 'utf8')) as {
+        jobs: Array<{ type: string; parameters: Record<string, unknown> }>
+      }
+    ).jobs
+
+  it('adds the activeScan job (capped by zapApiMaxMinutes) when the site opted into active checks', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const site = baseSite({ allowMutatingRequests: true, zapApiMaxMinutes: 30 })
+
+    const out = await runZapFe({
+      scanId: 'scan-5',
+      engine: 'zap-fe',
+      site,
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const jobs = readPlanJobs(workDir)
+    expect(jobs.map((j) => j.type)).toEqual([
+      'passiveScan-config',
+      'spider',
+      'spiderAjax',
+      'activeScan',
+      'passiveScan-wait',
+      'report',
+      'report',
+    ])
+    expect(jobs[3]?.parameters.maxScanDurationInMins).toBe(30)
+    expect(out.meta.activeScan).toBe(true)
+    expect(out.meta.activeScanMaxMinutes).toBe(30)
+  })
+
+  it('keeps the active scan off for an unconfirmed non-local site even when opted in', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const site = baseSite({
+      frontBaseUrl: 'https://staging.example.test',
+      allowMutatingRequests: true,
+      requiresConfirmation: true,
+      nonLocalConfirmed: false,
+    })
+
+    const out = await runZapFe({
+      scanId: 'scan-6',
+      engine: 'zap-fe',
+      site,
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    expect(readPlanJobs(workDir).some((j) => j.type === 'activeScan')).toBe(false)
+    expect(out.meta.activeScan).toBe(false)
   })
 
   it("tells the Ajax spider's Firefox to treat the localhost alias as a secure context", async () => {

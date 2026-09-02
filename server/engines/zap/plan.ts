@@ -23,6 +23,10 @@ export interface ZapFePlanInput {
   spiderMaxMinutes: number
   ajaxMaxMinutes: number
   passiveMaxMinutes: number
+  /** Present only when the site opted into active checks (see
+   * `domain/activeScan`): adds an `activeScan` job after the crawl so ZAP's
+   * XSS rules (reflected / DOM) run against what the spiders found. */
+  activeScan?: { maxScanMinutes: number }
   reportDir: string
 }
 
@@ -84,6 +88,28 @@ const ajaxSpiderJob = (contextName: string, url: string, maxDuration: number) =>
   },
 })
 
+/** Default policy, hard-capped by `maxScanDurationInMins`. */
+const activeScanJob = (
+  contextName: string,
+  maxScanMinutes: number,
+  extra: Record<string, unknown> = {},
+) => ({
+  type: 'activeScan',
+  parameters: {
+    context: contextName,
+    maxScanDurationInMins: maxScanMinutes,
+    maxAlertsPerRule: 20,
+    ...extra,
+  },
+})
+
+/** The FE active scan runs the DOM XSS rule, which opens one headless
+ * Firefox per scan thread: ZAP's default (2 × CPU cores) OOM-killed a 4 GB
+ * container within minutes, so it is pinned to one browser — the same budget
+ * the Ajax spider gets (`numberOfBrowsers: 1`). Its runtime is unpredictable,
+ * hence the hard cap. */
+const FE_ACTIVE_SCAN_PARAMS = { threadPerHost: 1 }
+
 const reportJobs = (reportDir: string) => [
   {
     type: 'report',
@@ -106,6 +132,9 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
         parameters: { context: i.context.name, url: i.seedUrl, maxDuration: i.spiderMaxMinutes },
       },
       ajaxSpiderJob(i.context.name, i.seedUrl, i.ajaxMaxMinutes),
+      ...(i.activeScan
+        ? [activeScanJob(i.context.name, i.activeScan.maxScanMinutes, FE_ACTIVE_SCAN_PARAMS)]
+        : []),
       { type: 'passiveScan-wait', parameters: { maxDuration: i.passiveMaxMinutes } },
       ...reportJobs(i.reportDir),
     ],
@@ -154,14 +183,7 @@ export function buildZapApiPlan(i: ZapApiPlanInput): Record<string, unknown> {
         type: 'openapi',
         parameters: { ...i.openapi, targetUrl: i.targetUrl, context: i.context.name },
       },
-      {
-        type: 'activeScan',
-        parameters: {
-          context: i.context.name,
-          maxScanDurationInMins: i.maxScanMinutes,
-          maxAlertsPerRule: 20,
-        },
-      },
+      activeScanJob(i.context.name, i.maxScanMinutes),
       { type: 'passiveScan-wait', parameters: { maxDuration: i.passiveMaxMinutes } },
       ...reportJobs(i.reportDir),
     ],

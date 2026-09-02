@@ -83,6 +83,11 @@ function zapRows(meta: Record<string, unknown>, isFrontend: boolean): string[] {
     if (spider) rows.push(`| Spider | ${text(spider)} |`)
     const spiderMaxMinutes = metaNumber(meta, 'spiderMaxMinutes')
     if (spiderMaxMinutes !== undefined) rows.push(`| Spider max minutes | ${spiderMaxMinutes} |`)
+    if (metaBoolean(meta, 'activeScan')) {
+      const activeScanMaxMinutes = metaNumber(meta, 'activeScanMaxMinutes')
+      const cap = activeScanMaxMinutes !== undefined ? ` (max ${activeScanMaxMinutes} min)` : ''
+      rows.push(`| Active scan | Yes${cap} |`)
+    }
   } else {
     const targetUrl = metaString(meta, 'targetUrl')
     if (targetUrl) rows.push(`| Target URL | ${code(targetUrl)} |`)

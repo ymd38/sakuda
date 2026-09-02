@@ -262,6 +262,18 @@ describe('buildScanMarkdown', () => {
     expect(md.split('\n')).toContain('| Fuzzable URLs (with query params) | 3 |')
   })
 
+  it('renders the zap-fe Active scan row with its cap only when meta.activeScan is true', () => {
+    // the shared fixture has no activeScan meta at all → no row
+    expect(lines.some((l) => l.startsWith('| Active scan'))).toBe(false)
+    const md = buildScanMarkdown({
+      ...detail,
+      engineRuns: [
+        { ...zapFeRun, meta: { ...zapFeRun.meta, activeScan: true, activeScanMaxMinutes: 45 } },
+      ],
+    })
+    expect(md.split('\n')).toContain('| Active scan | Yes (max 45 min) |')
+  })
+
   it('renders findings grouped by severity with a NEW marker', () => {
     expect(lines).toContain('### high')
     expect(lines).toContain('#### exposed-panel — Exposed Admin Panel **NEW**')

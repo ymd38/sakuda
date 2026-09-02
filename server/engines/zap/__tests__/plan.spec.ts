@@ -66,6 +66,45 @@ describe('buildZapFePlan', () => {
       ],
     })
   })
+
+  it('inserts an activeScan job between the Ajax spider and passiveScan-wait when active checks are on', () => {
+    const base = {
+      context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
+      seedUrl: 'http://h:3000/',
+      spiderMaxMinutes: 5,
+      ajaxMaxMinutes: 5,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    }
+    // as: plans are Record<string, unknown>; narrow the job list for assertions only
+    const jobsOf = (plan: Record<string, unknown>) =>
+      plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>
+
+    const on = jobsOf(buildZapFePlan({ ...base, activeScan: { maxScanMinutes: 45 } }))
+    expect(on.map((j) => j.type)).toEqual([
+      'passiveScan-config',
+      'spider',
+      'spiderAjax',
+      'activeScan',
+      'passiveScan-wait',
+      'report',
+      'report',
+    ])
+    // threadPerHost 1: the DOM XSS rule opens one headless Firefox per scan
+    // thread, and ZAP's default (2 × CPU cores) OOM-kills a 4 GB container.
+    expect(on[3]).toEqual({
+      type: 'activeScan',
+      parameters: {
+        context: 'sakuda',
+        maxScanDurationInMins: 45,
+        maxAlertsPerRule: 20,
+        threadPerHost: 1,
+      },
+    })
+
+    // Off: the plan is exactly the default one, job for job.
+    expect(jobsOf(buildZapFePlan(base))).toEqual(on.filter((j) => j.type !== 'activeScan'))
+  })
 })
 
 describe('buildZapApiPlan', () => {

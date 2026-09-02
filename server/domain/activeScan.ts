@@ -9,8 +9,8 @@ export type ActiveScanSite = Pick<
 /**
  * The one place that decides whether a scan may send active requests
  * (attack payloads that can alter the target's state). Every engine that
- * has an active mode — today nuclei's DAST templates, next ZAP's FE
- * activeScan (#17) — reads this and never re-derives it.
+ * has an active mode — nuclei's DAST templates, ZAP's FE activeScan —
+ * reads this and never re-derives it.
  *
  * Mirrors SPEC §6.1's "environment ∧ scope" conjunction on the MVP's single
  * `sites` row: the user opted this site in (scope) AND ownership of the host
