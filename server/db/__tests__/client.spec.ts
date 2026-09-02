@@ -21,6 +21,7 @@ function siteRow(id: string) {
     zapApiMaxMinutes: 45,
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: false,
+    allowMutatingRequests: false,
     headersEnc: null,
     headerNames: [],
     browserStorageNames: [],

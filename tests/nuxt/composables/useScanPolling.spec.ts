@@ -33,6 +33,7 @@ function scanFixture(overrides: Partial<ScanDetail> = {}): ScanDetail {
       zapApiMaxMinutes: 45,
       zapFeSpiderMaxMinutes: 5,
       nonLocalConfirmed: true,
+      allowMutatingRequests: false,
       headerNames: [],
       browserStorageNames: [],
       requiresConfirmation: false,

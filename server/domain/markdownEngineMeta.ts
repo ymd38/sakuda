@@ -50,6 +50,12 @@ function nucleiRows(meta: Record<string, unknown>): string[] {
   if (rateLimit !== undefined) rows.push(`| Rate limit | ${rateLimit} req/s |`)
   const concurrency = metaNumber(meta, 'concurrency')
   if (concurrency !== undefined) rows.push(`| Concurrency | ${concurrency} |`)
+  if (metaBoolean(meta, 'activeScan')) {
+    rows.push('| Active checks (DAST) | Yes |')
+    const parameterizedUrlCount = metaNumber(meta, 'parameterizedUrlCount')
+    if (parameterizedUrlCount !== undefined)
+      rows.push(`| Fuzzable URLs (with query params) | ${parameterizedUrlCount} |`)
+  }
   const stats = metaRecord(meta, 'stats')
   if (stats) {
     const templates = metaString(stats, 'templates')

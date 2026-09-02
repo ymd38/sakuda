@@ -78,22 +78,23 @@ Override per invocation with `make up SAKUDA_PORT=3005`.
 
 ## Environment variables
 
-| Variable                      | Default                                                   | Notes                                                                                                                            |
-| ----------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `SAKUDA_ENCRYPTION_KEY`       | _(required)_                                              | base64 of 32 random bytes. Generate with `pnpm keygen` or `openssl rand -base64 32`.                                             |
-| `SAKUDA_DATA_DIR`             | `./data` (`/data` in the image)                           | SQLite DB + per-scan work dirs live here.                                                                                        |
-| `SAKUDA_MIGRATIONS_DIR`       | `./server/db/migrations` (`/app/migrations` in the image) | Drizzle migrations applied on boot.                                                                                              |
-| `SAKUDA_NUCLEI_BIN`           | `nuclei` (`/usr/local/bin/nuclei` in the image)           | Path to the nuclei binary.                                                                                                       |
-| `SAKUDA_NUCLEI_TEMPLATES`     | `/opt/nuclei-templates/http`                              | Pinned nuclei-templates checkout.                                                                                                |
-| `SAKUDA_NUCLEI_MAX_MINUTES`   | `60`                                                      | Hard timeout for a nuclei run.                                                                                                   |
-| `SAKUDA_ZAP_CMD`              | `zap.sh` (`/zap/zap.sh` in the image)                     | ZAP entrypoint. Dev on macOS: `./scripts/zap-docker.sh`.                                                                         |
-| `SAKUDA_ZAP_WORKDIR`          | _(unset)_                                                 | Container-side path when ZAP sees the scan work dir at a different path than the host (the dev wrapper mounts it at `/zap/wrk`). |
-| `SAKUDA_ZAP_MAX_HEAP`         | `1024m`                                                   | `-Xmx` passed to ZAP via `JAVA_TOOL_OPTIONS`.                                                                                    |
-| `SAKUDA_LOCALHOST_ALIAS`      | _(unset)_                                                 | Rewrites `localhost`/`127.0.0.1` in target URLs for all engines.                                                                 |
-| `SAKUDA_ZAP_LOCALHOST_ALIAS`  | `host.docker.internal`                                    | Same, for ZAP only (falls back to `SAKUDA_LOCALHOST_ALIAS`). ZAP's Firefox treats this host as a secure context.                 |
-| `SAKUDA_ENGINE_GRACE_MINUTES` | `10`                                                      | Grace period before an orphaned engine process is treated as failed.                                                             |
-| `SAKUDA_JOB_RUNNER`           | `on`                                                      | Set `off` to disable the in-process scan queue (e.g. in tests).                                                                  |
-| `LOG_LEVEL`                   | `info`                                                    | `debug` \| `info` \| `warn` \| `error`.                                                                                          |
+| Variable                       | Default                                                   | Notes                                                                                                                            |
+| ------------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `SAKUDA_ENCRYPTION_KEY`        | _(required)_                                              | base64 of 32 random bytes. Generate with `pnpm keygen` or `openssl rand -base64 32`.                                             |
+| `SAKUDA_DATA_DIR`              | `./data` (`/data` in the image)                           | SQLite DB + per-scan work dirs live here.                                                                                        |
+| `SAKUDA_MIGRATIONS_DIR`        | `./server/db/migrations` (`/app/migrations` in the image) | Drizzle migrations applied on boot.                                                                                              |
+| `SAKUDA_NUCLEI_BIN`            | `nuclei` (`/usr/local/bin/nuclei` in the image)           | Path to the nuclei binary.                                                                                                       |
+| `SAKUDA_NUCLEI_TEMPLATES`      | `/opt/nuclei-templates/http`                              | Pinned nuclei-templates checkout.                                                                                                |
+| `SAKUDA_NUCLEI_DAST_TEMPLATES` | `/opt/nuclei-templates/dast`                              | DAST (fuzzing) templates, loaded only for sites with "Active injection checks" on.                                               |
+| `SAKUDA_NUCLEI_MAX_MINUTES`    | `60`                                                      | Hard timeout for a nuclei run.                                                                                                   |
+| `SAKUDA_ZAP_CMD`               | `zap.sh` (`/zap/zap.sh` in the image)                     | ZAP entrypoint. Dev on macOS: `./scripts/zap-docker.sh`.                                                                         |
+| `SAKUDA_ZAP_WORKDIR`           | _(unset)_                                                 | Container-side path when ZAP sees the scan work dir at a different path than the host (the dev wrapper mounts it at `/zap/wrk`). |
+| `SAKUDA_ZAP_MAX_HEAP`          | `1024m`                                                   | `-Xmx` passed to ZAP via `JAVA_TOOL_OPTIONS`.                                                                                    |
+| `SAKUDA_LOCALHOST_ALIAS`       | _(unset)_                                                 | Rewrites `localhost`/`127.0.0.1` in target URLs for all engines.                                                                 |
+| `SAKUDA_ZAP_LOCALHOST_ALIAS`   | `host.docker.internal`                                    | Same, for ZAP only (falls back to `SAKUDA_LOCALHOST_ALIAS`). ZAP's Firefox treats this host as a secure context.                 |
+| `SAKUDA_ENGINE_GRACE_MINUTES`  | `10`                                                      | Grace period before an orphaned engine process is treated as failed.                                                             |
+| `SAKUDA_JOB_RUNNER`            | `on`                                                      | Set `off` to disable the in-process scan queue (e.g. in tests).                                                                  |
+| `LOG_LEVEL`                    | `info`                                                    | `debug` \| `info` \| `warn` \| `error`.                                                                                          |
 
 Full defaults and validation: `server/config/env.ts`. See `.env.example` for
 a copyable local `.env`.

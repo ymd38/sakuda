@@ -61,6 +61,7 @@ USER zap
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 HOME=/home/zap \
     SAKUDA_DATA_DIR=/data SAKUDA_MIGRATIONS_DIR=/app/migrations \
     SAKUDA_NUCLEI_BIN=/usr/local/bin/nuclei SAKUDA_NUCLEI_TEMPLATES=/opt/nuclei-templates/http \
+    SAKUDA_NUCLEI_DAST_TEMPLATES=/opt/nuclei-templates/dast \
     SAKUDA_ZAP_CMD=/zap/zap.sh SAKUDA_LOCALHOST_ALIAS=host.docker.internal
 EXPOSE 3000
 VOLUME ["/data"]

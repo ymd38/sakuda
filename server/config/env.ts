@@ -42,6 +42,14 @@ const EnvSchema = z.object({
   SAKUDA_MIGRATIONS_DIR: z.string().default('./server/db/migrations'),
   SAKUDA_NUCLEI_BIN: z.string().default('nuclei'),
   SAKUDA_NUCLEI_TEMPLATES: z.string().default('/opt/nuclei-templates/http'),
+  // Non-empty: an explicit empty value would make `dastTemplatesDir` falsy and
+  // silently drop `-t <dir>`/`-dast`, so an opted-in active scan would revert to
+  // passive with no error. Fail fast at startup instead.
+  SAKUDA_NUCLEI_DAST_TEMPLATES: z
+    .string()
+    .trim()
+    .min(1, 'SAKUDA_NUCLEI_DAST_TEMPLATES must not be empty')
+    .default('/opt/nuclei-templates/dast'),
   SAKUDA_NUCLEI_MAX_MINUTES: z.coerce.number().int().positive().default(60),
   SAKUDA_ZAP_CMD: z.string().default('zap.sh'),
   SAKUDA_ZAP_WORKDIR: optionalString,
@@ -65,7 +73,7 @@ export interface Env {
   discoveriesDir: string
   migrationsDir: string
   localhostAlias: string | undefined
-  nuclei: { bin: string; templatesDir: string; maxMinutes: number }
+  nuclei: { bin: string; templatesDir: string; dastTemplatesDir: string; maxMinutes: number }
   zap: {
     cmd: string
     workDir: string | undefined
@@ -97,6 +105,7 @@ export function parseEnv(raw: NodeJS.ProcessEnv): Env {
     nuclei: {
       bin: resolveExecutablePath(v.SAKUDA_NUCLEI_BIN),
       templatesDir: v.SAKUDA_NUCLEI_TEMPLATES,
+      dastTemplatesDir: v.SAKUDA_NUCLEI_DAST_TEMPLATES,
       maxMinutes: v.SAKUDA_NUCLEI_MAX_MINUTES,
     },
     zap: {

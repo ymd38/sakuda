@@ -18,6 +18,8 @@ describe('parseEnv', () => {
     expect(env.dbFile).toBe('/tmp/x/sakuda.db')
     expect(env.scansDir).toBe('/tmp/x/scans')
     expect(env.nuclei.maxMinutes).toBe(60)
+    expect(env.nuclei.templatesDir).toBe('/opt/nuclei-templates/http')
+    expect(env.nuclei.dastTemplatesDir).toBe('/opt/nuclei-templates/dast')
     expect(env.zap.cmd).toBe('zap.sh')
     expect(env.jobRunner).toBe(true)
   })
@@ -66,5 +68,23 @@ describe('parseEnv', () => {
       expect(env.zap.cmd).toBe('/zap/zap.sh')
       expect(env.nuclei.bin).toBe('/usr/local/bin/nuclei')
     })
+  })
+})
+
+describe('SAKUDA_NUCLEI_DAST_TEMPLATES', () => {
+  it('overrides the DAST template tree independently of the signature templates', () => {
+    const env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_TEMPLATES: '/tpl/http',
+      SAKUDA_NUCLEI_DAST_TEMPLATES: '/tpl/dast',
+    })
+    expect(env.nuclei.templatesDir).toBe('/tpl/http')
+    expect(env.nuclei.dastTemplatesDir).toBe('/tpl/dast')
+  })
+
+  it('rejects an explicitly empty DAST template path (fail fast, not a silent passive fallback)', () => {
+    expect(() =>
+      parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_NUCLEI_DAST_TEMPLATES: '   ' }),
+    ).toThrow(/SAKUDA_NUCLEI_DAST_TEMPLATES must not be empty/)
   })
 })

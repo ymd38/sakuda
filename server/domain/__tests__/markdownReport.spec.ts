@@ -17,6 +17,7 @@ const siteSnapshot: SiteSnapshot = {
   zapApiMaxMinutes: 10,
   zapFeSpiderMaxMinutes: 5,
   nonLocalConfirmed: true,
+  allowMutatingRequests: false,
   headerNames: ['Authorization'],
   browserStorageNames: [],
   requiresConfirmation: false,
@@ -230,6 +231,21 @@ describe('buildScanMarkdown', () => {
 
   it('renders the nuclei Tags row from the real string[] meta shape', () => {
     expect(lines).toContain('| Tags | `cve,exposure` |')
+  })
+
+  it('omits the Active checks row when meta.activeScan is false or absent', () => {
+    expect(lines.some((l) => l.startsWith('| Active checks'))).toBe(false)
+  })
+
+  it('renders the Active checks (DAST) and fuzzable-URL rows when meta.activeScan is true', () => {
+    const md = buildScanMarkdown({
+      ...detail,
+      engineRuns: [
+        { ...nucleiRun, meta: { ...nucleiRun.meta, activeScan: true, parameterizedUrlCount: 3 } },
+      ],
+    })
+    expect(md.split('\n')).toContain('| Active checks (DAST) | Yes |')
+    expect(md.split('\n')).toContain('| Fuzzable URLs (with query params) | 3 |')
   })
 
   it('renders findings grouped by severity with a NEW marker', () => {

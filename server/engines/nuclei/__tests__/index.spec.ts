@@ -62,6 +62,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     zapApiMaxMinutes: 45,
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: false,
+    allowMutatingRequests: false,
     headerNames: [],
     browserStorageNames: [],
     requiresConfirmation: false,
@@ -197,5 +198,108 @@ describe('runNuclei', () => {
       }),
     ).rejects.toThrow(/no target URLs/)
     expect(existsSync(join(workDir, 'targets.txt'))).toBe(false)
+  })
+})
+
+// Records argv next to the output file so a test can assert on the exact
+// flags the engine passed, then behaves like FAKE_SUCCESS.
+const FAKE_RECORD_ARGS = `#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+const args = process.argv.slice(2)
+const outFile = args[args.indexOf('-o') + 1]
+fs.writeFileSync(path.join(path.dirname(outFile), 'argv.json'), JSON.stringify(args))
+fs.writeFileSync(outFile, '')
+console.log(JSON.stringify({ requests: '10', errors: '0' }))
+process.exit(0)
+`
+
+describe('runNuclei active injection checks (allowMutatingRequests)', () => {
+  let tmp: string
+  const logger = pino({ level: 'silent' })
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'sakuda-nuclei-dast-'))
+  })
+
+  async function run(site: SiteWithHeaders) {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_RECORD_ARGS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+      SAKUDA_NUCLEI_TEMPLATES: '/tpl/http',
+      SAKUDA_NUCLEI_DAST_TEMPLATES: '/tpl/dast',
+    })
+    const workDir = join(tmp, 'work')
+    const out = await runNuclei({
+      scanId: 'scan-dast',
+      engine: 'nuclei',
+      site,
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    // as: argv.json is written by the fake binary above as a JSON string[]
+    const argv = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8')) as string[]
+    return { out, argv }
+  }
+
+  it('passes neither -dast nor the DAST template dir when the site is not opted in', async () => {
+    const { out, argv } = await run(baseSite({ nucleiPaths: '/search?q=' }))
+    expect(argv).not.toContain('-dast')
+    expect(argv).not.toContain('/tpl/dast')
+    expect(out.meta.activeScan).toBe(false)
+    expect(out.meta.dastTemplatesDir).toBeUndefined()
+    expect(out.warnings).toEqual([])
+  })
+
+  it('seeds empty query values in the targets file only when opted in', async () => {
+    const on = await run(baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=' }))
+    expect(readFileSync(join(tmp, 'work', 'targets.txt'), 'utf8')).toContain('/search?q=1')
+
+    const off = await run(baseSite({ nucleiPaths: '/search?q=' }))
+    expect(readFileSync(join(tmp, 'work', 'targets.txt'), 'utf8')).toContain('/search?q=\n')
+    expect(readFileSync(join(tmp, 'work', 'targets.txt'), 'utf8')).not.toContain('/search?q=1')
+    void on
+    void off
+  })
+
+  it('passes -dast and the DAST template dir when the site is opted in', async () => {
+    const { out, argv } = await run(
+      baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=\n/plain' }),
+    )
+    expect(argv).toContain('-dast')
+    expect(argv.slice(argv.indexOf('-t'), argv.indexOf('-t') + 4)).toEqual([
+      '-t',
+      '/tpl/http',
+      '-t',
+      '/tpl/dast',
+    ])
+    expect(out.meta.activeScan).toBe(true)
+    expect(out.meta.dastTemplatesDir).toBe('/tpl/dast')
+    expect(out.meta.parameterizedUrlCount).toBe(1)
+    expect(out.warnings).toEqual([])
+  })
+
+  it('warns when opted in but no saved target carries query parameters', async () => {
+    const { out, argv } = await run(baseSite({ allowMutatingRequests: true }))
+    expect(argv).toContain('-dast')
+    expect(out.meta.parameterizedUrlCount).toBe(0)
+    expect(out.warnings).toEqual([expect.stringMatching(/no saved target has query parameters/)])
+  })
+
+  it('stays passive when opted in but ownership of a non-local host is unconfirmed', async () => {
+    const { out, argv } = await run(
+      baseSite({
+        frontBaseUrl: 'https://staging.example.com',
+        requiresConfirmation: true,
+        nonLocalConfirmed: false,
+        allowMutatingRequests: true,
+      }),
+    )
+    expect(argv).not.toContain('-dast')
+    expect(out.meta.activeScan).toBe(false)
   })
 })

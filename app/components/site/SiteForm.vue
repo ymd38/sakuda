@@ -30,6 +30,7 @@ const form = reactive({
   zapApiMaxMinutes: props.initial?.zapApiMaxMinutes ?? 45,
   zapFeSpiderMaxMinutes: props.initial?.zapFeSpiderMaxMinutes ?? 5,
   nonLocalConfirmed: props.initial?.nonLocalConfirmed ?? false,
+  allowMutatingRequests: props.initial?.allowMutatingRequests ?? false,
 })
 
 // `shared/utils/localHost.ts` — auto-imported from `shared/utils/*`. A blank
@@ -136,6 +137,7 @@ function buildPayload(): SiteInput {
     zapApiMaxMinutes: toFiniteNumber(form.zapApiMaxMinutes, 45),
     zapFeSpiderMaxMinutes: toFiniteNumber(form.zapFeSpiderMaxMinutes, 5),
     nonLocalConfirmed: form.nonLocalConfirmed,
+    allowMutatingRequests: form.allowMutatingRequests,
   }
   return {
     ...base,
@@ -385,6 +387,27 @@ function handleSubmit() {
       <label for="site-non-local-confirm" class="text-caption-md text-ink">
         The target host is not local. I confirm I am authorized to scan it.
       </label>
+    </div>
+
+    <div class="card flex flex-col gap-2">
+      <div class="flex items-start gap-3">
+        <input
+          id="site-allow-mutating-requests"
+          v-model="form.allowMutatingRequests"
+          data-testid="allow-mutating-requests"
+          type="checkbox"
+          class="mt-1"
+        />
+        <label for="site-allow-mutating-requests" class="text-caption-md font-medium text-ink">
+          Active injection checks (sends attack payloads; may modify data)
+        </label>
+      </div>
+      <p class="text-caption-sm text-mute">
+        Off (default): passive and signature checks only — nothing that changes state. On: nuclei
+        also runs its DAST templates (SQLi, LFI, SSTI, SSRF, …) against saved targets that have
+        query parameters, e.g. "/search?q=". Only enable this for an environment you own and can
+        reset; it may corrupt or delete data.
+      </p>
     </div>
 
     <div class="flex flex-col gap-3">

@@ -1,6 +1,11 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import {
+  countParameterizedUrls,
+  isActiveScanEnabled,
+  seedEmptyQueryValues,
+} from '../../domain/activeScan'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { expandNucleiTargets } from '../../domain/nucleiTargets'
 import { runCommand } from '../runCommand'
@@ -15,12 +20,20 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   const originalHost = new URL(site.frontBaseUrl).hostname
   const targetsFile = join(workDir, 'targets.txt')
   const outputFile = join(workDir, 'findings.jsonl')
+  const tags = nucleiTagsFor(site.headers.length > 0)
+  // The single source of truth for "may this scan attack the target" —
+  // never decided here, only read (see domain/activeScan).
+  const activeScan = isActiveScanEnabled(site)
+  const parameterizedUrlCount = countParameterizedUrls(urls)
+  // Active runs seed empty query values (`?q=` → `?q=1`) so the DAST fuzzer
+  // has something to mutate; only the transient targets file changes, not
+  // the site's saved list.
+  const targetUrls = activeScan ? seedEmptyQueryValues(urls) : urls
   await mkdir(workDir, { recursive: true })
   await writeFile(
     targetsFile,
-    urls.map((u) => rewriteLoopbackHost(u, env.localhostAlias)).join('\n') + '\n',
+    targetUrls.map((u) => rewriteLoopbackHost(u, env.localhostAlias)).join('\n') + '\n',
   )
-  const tags = nucleiTagsFor(site.headers.length > 0)
   const args = buildNucleiArgs({
     targetsFile,
     templatesDir: env.nuclei.templatesDir,
@@ -29,6 +42,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
     concurrency: 25,
     tags,
     headers: site.headers,
+    ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
   })
   logger.info(
     {
@@ -37,6 +51,8 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       urlCount: urls.length,
       excludedCount: excluded.length,
       tags,
+      activeScan,
+      parameterizedUrlCount,
       rateLimit: site.nucleiRateLimit,
       headerNames: site.headerNames,
     },
@@ -79,6 +95,10 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       `error rate ${((errs / req) * 100).toFixed(1)}% (${errs}/${req}); coverage may be reduced — lower nucleiRateLimit`,
     )
   if (invalidLines > 0) warnings.push(`${invalidLines} unparsable JSONL line(s) ignored`)
+  if (activeScan && parameterizedUrlCount === 0)
+    warnings.push(
+      'active injection checks are on but no saved target has query parameters, so the DAST templates had nothing to fuzz — add parameterized paths (e.g. /search?q=) to the target list',
+    )
   return {
     findings,
     counts,
@@ -92,6 +112,9 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       rateLimit: site.nucleiRateLimit,
       concurrency: 25,
       templatesDir: env.nuclei.templatesDir,
+      activeScan,
+      ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
+      parameterizedUrlCount,
       stats,
       durationSec: Math.round(result.durationMs / 1000),
       timedOut: result.timedOut,

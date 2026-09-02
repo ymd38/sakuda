@@ -20,6 +20,7 @@ const editSite: SitePublic = {
   zapApiMaxMinutes: 45,
   zapFeSpiderMaxMinutes: 5,
   nonLocalConfirmed: true,
+  allowMutatingRequests: false,
   headerNames: ['Authorization', 'X-Api-Key'],
   browserStorageNames: [],
   requiresConfirmation: true,
@@ -70,6 +71,22 @@ describe('SiteForm', () => {
 
     await confirm.setValue(true)
     expect(submit.disabled).toBe(false)
+  })
+
+  it('submits active injection checks off by default and on once the checkbox is ticked', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    await wrapper.find('[data-testid="name"]').setValue('Example')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+    expect(emittedSubmit(wrapper).allowMutatingRequests).toBe(false)
+
+    await wrapper.find('[data-testid="allow-mutating-requests"]').setValue(true)
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+    const events = wrapper.emitted('submit')
+    const last = events?.[events.length - 1]?.[0]
+    expect(SiteInputSchema.parse(last).allowMutatingRequests).toBe(true)
   })
 
   it('hides the non-local confirmation for a local frontBaseUrl', async () => {

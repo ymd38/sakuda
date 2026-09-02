@@ -19,6 +19,7 @@ function siteFixture(overrides: Partial<SitePublic> = {}): SitePublic {
     zapApiMaxMinutes: 45,
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: true,
+    allowMutatingRequests: false,
     headerNames: [],
     browserStorageNames: [],
     requiresConfirmation: false,

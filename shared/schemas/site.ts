@@ -35,6 +35,10 @@ export const SiteInputSchema = z
     zapApiMaxMinutes: z.number().int().min(1).max(600).default(45),
     zapFeSpiderMaxMinutes: z.number().int().min(1).max(120).default(5),
     nonLocalConfirmed: z.boolean().default(false),
+    /** Site-level opt-in for active injection checks (nuclei DAST). Off by
+     * default: a scan then sends passive + signature requests only. See
+     * `server/domain/activeScan.ts` for the effective decision. */
+    allowMutatingRequests: z.boolean().default(false),
     headers: HeadersSchema.optional(),
     /** Injected into ZAP's browser before the Ajax spider runs (SPA login state). */
     browserStorage: BrowserStorageSchema.optional(),

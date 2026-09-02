@@ -26,6 +26,7 @@ describe('SiteInputSchema', () => {
       zapApiMaxMinutes: 45,
       zapFeSpiderMaxMinutes: 5,
       nonLocalConfirmed: false,
+      allowMutatingRequests: false,
     })
   })
 
@@ -88,6 +89,7 @@ describe('SiteInputSchema', () => {
       ...minimal,
       frontBaseUrl: 'https://app.example.com',
       nonLocalConfirmed: true,
+      allowMutatingRequests: false,
     })
     expect(result.success).toBe(true)
   })

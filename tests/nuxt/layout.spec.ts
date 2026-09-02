@@ -19,6 +19,7 @@ function siteFixture(id: string, name: string): SiteListItem {
     zapApiMaxMinutes: 45,
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: true,
+    allowMutatingRequests: false,
     headerNames: [],
     browserStorageNames: [],
     requiresConfirmation: false,

@@ -58,6 +58,7 @@ function insertScan(
         zapApiMaxMinutes: 45,
         zapFeSpiderMaxMinutes: 5,
         nonLocalConfirmed: false,
+        allowMutatingRequests: false,
         headerNames: [],
         browserStorageNames: [],
         requiresConfirmation: false,

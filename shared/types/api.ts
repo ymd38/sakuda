@@ -27,6 +27,8 @@ export interface SitePublic {
   zapApiMaxMinutes: number
   zapFeSpiderMaxMinutes: number
   nonLocalConfirmed: boolean
+  /** Opt-in for active injection checks; effective only with ownership established. */
+  allowMutatingRequests: boolean
   headerNames: string[]
   /** kind + name of each injected browser-storage item; values are write-only. */
   browserStorageNames: BrowserStorageName[]

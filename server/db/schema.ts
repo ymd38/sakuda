@@ -17,6 +17,9 @@ export const sites = sqliteTable('sites', {
   zapApiMaxMinutes: integer('zap_api_max_minutes').notNull(),
   zapFeSpiderMaxMinutes: integer('zap_fe_spider_max_minutes').notNull(),
   nonLocalConfirmed: integer('non_local_confirmed', { mode: 'boolean' }).notNull(),
+  allowMutatingRequests: integer('allow_mutating_requests', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   headersEnc: blob('headers_enc', { mode: 'buffer' }),
   headerNames: text('header_names', { mode: 'json' }).$type<string[]>().notNull(),
   browserStorageEnc: blob('browser_storage_enc', { mode: 'buffer' }),

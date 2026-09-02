@@ -9,6 +9,10 @@ export interface NucleiArgsInput {
   concurrency: number
   tags: string[]
   headers: Header[]
+  /** Set only when active checks are enabled (see `domain/activeScan`):
+   * loads the DAST (fuzzing) template tree next to the signature templates
+   * and passes `-dast`, without which nuclei skips every fuzzing template. */
+  dastTemplatesDir?: string
 }
 
 export const NUCLEI_BASE_TAGS = ['xss', 'injection', 'sqli', 'ssrf', 'lfi', 'exposure', 'misconfig']
@@ -23,12 +27,14 @@ export function buildNucleiArgs(i: NucleiArgsInput): string[] {
     i.targetsFile,
     '-t',
     i.templatesDir,
+    ...(i.dastTemplatesDir ? ['-t', i.dastTemplatesDir] : []),
     '-tags',
     i.tags.join(','),
     '-severity',
     'critical,high,medium',
     '-exclude-tags',
     'dos,fuzz,intrusive',
+    ...(i.dastTemplatesDir ? ['-dast'] : []),
     '-rate-limit',
     String(i.rateLimit),
     '-c',

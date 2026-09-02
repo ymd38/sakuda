@@ -1,0 +1,1 @@
+ALTER TABLE `sites` ADD `allow_mutating_requests` integer DEFAULT false NOT NULL;

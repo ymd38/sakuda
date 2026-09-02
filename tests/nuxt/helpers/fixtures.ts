@@ -68,6 +68,7 @@ export function scanDetailFixture(overrides: Partial<ScanDetail> = {}): ScanDeta
       zapApiMaxMinutes: 45,
       zapFeSpiderMaxMinutes: 5,
       nonLocalConfirmed: true,
+      allowMutatingRequests: false,
       headerNames: [],
       browserStorageNames: [],
       requiresConfirmation: false,
