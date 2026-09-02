@@ -258,6 +258,64 @@ describe('SiteForm', () => {
     await wrapper.find('[data-testid="site-form"]').trigger('submit')
     expect(emittedSubmit2(wrapper).browserStorage).toEqual([])
   })
+
+  it('groups the fields into engine sections, each with a legend and engine badges', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    const sections = wrapper.findAll('fieldset[data-testid^="section-"]')
+    expect(sections.map((s) => s.attributes('data-testid'))).toEqual([
+      'section-site',
+      'section-nuclei',
+      'section-zap-fe',
+      'section-zap-api',
+      'section-active',
+      'section-auth',
+    ])
+    const badgesOf = (testid: string) =>
+      wrapper
+        .find(`[data-testid="${testid}"]`)
+        .findAll('legend [data-testid="engine-badge"]')
+        .map((b) => b.text())
+    // every section is a bordered box with a heading-lg legend
+    for (const s of sections) {
+      expect(s.classes()).toEqual(expect.arrayContaining(['card', 'border-hairline']))
+      expect(s.find('legend .text-heading-lg').exists()).toBe(true)
+    }
+    expect(badgesOf('section-site')).toEqual(['All engines'])
+    expect(badgesOf('section-nuclei')).toEqual(['Nuclei'])
+    expect(badgesOf('section-zap-fe')).toEqual(['ZAP frontend'])
+    expect(badgesOf('section-zap-api')).toEqual(['ZAP API'])
+    expect(badgesOf('section-active')).toEqual(['Nuclei', 'ZAP frontend'])
+    expect(badgesOf('section-auth')).toEqual(['All engines'])
+
+    // each field sits in the section of the engine that reads it
+    const within = (testid: string, field: string) =>
+      wrapper.find(`[data-testid="${testid}"] [data-testid="${field}"]`).exists()
+    expect(within('section-nuclei', 'nuclei-paths')).toBe(true)
+    expect(within('section-nuclei', 'risk-tag-fuzz')).toBe(true)
+    expect(within('section-zap-fe', 'discovery-seed-paths')).toBe(true)
+    expect(within('section-zap-fe', 'add-storage')).toBe(true)
+    expect(within('section-zap-api', 'openapi-json')).toBe(true)
+    expect(within('section-zap-api', 'zap-api-max-minutes')).toBe(true)
+    expect(within('section-active', 'allow-mutating-requests')).toBe(true)
+    expect(within('section-auth', 'add-header')).toBe(true)
+  })
+
+  it('renders a Cancel link next to submit only when cancelTo is given', async () => {
+    const withCancel = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null, cancelTo: '/sites/site-1' },
+    })
+    const cancel = withCancel.find('[data-testid="cancel"]')
+    expect(cancel.exists()).toBe(true)
+    expect(cancel.attributes('href')).toBe('/sites/site-1')
+    expect(cancel.text()).toBe('Cancel')
+
+    const without = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    expect(without.find('[data-testid="cancel"]').exists()).toBe(false)
+  })
 })
 
 /** Second emitted submit (the first is consumed by `emittedSubmit`). */

@@ -228,6 +228,13 @@ components:
     typography: "{typography.heading-md}"
     rounded: "{rounded.none}"
     padding: 24px 0px
+  form-section:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    typography: "{typography.heading-lg}"
+    rounded: "{rounded.none}"
+    padding: 24px
+    border: 1px solid {colors.hairline}
   pdp-disclosure-row:
     backgroundColor: "{colors.canvas}"
     textColor: "{colors.ink}"
@@ -431,6 +438,10 @@ Depth in Nike's system comes entirely from photography, not from CSS effects:
 **`search-pill`** + **`search-pill-focused`**
 - Default: background `{colors.soft-cloud}`, text `{colors.ink}`, type `{typography.body-md}`, rounded `{rounded.md}` (24px), padding `8px 16px`, height `40px`. Anchored to the right of the primary nav with a small magnifier icon.
 - Focused: background `{colors.canvas}`, 2px solid border `{colors.ink}`, with a 12px outer halo of `{colors.soft-cloud}` (the system's only "focus ring" effect). The pill shape stays `{rounded.md}` so the halo reads as a soft glove, not a hard outline.
+
+**`form-section`**
+- A long settings form is split into `<fieldset>` boxes, one per consumer (for sakuda: the engine that reads the fields): `{colors.canvas}` surface, 1px `{colors.hairline}` border (the stronger hairline — the box *is* the separation, so it must read at a glance), `{rounded.none}`, 24px padding, stacked with `{spacing.section}` between boxes. The `<legend>` sits in the top border line, native fieldset style: section title in `{typography.heading-lg}` uppercase display face, followed by one or more `badge-promo` chips naming the consumer(s) ("Nuclei", "ZAP frontend", "All engines").
+- Fields inside keep the standard `{spacing.xl}` gap; a section never nests another box (no `card` inside a `form-section`). Form actions (primary submit + `button-secondary` Cancel) sit together in one row after the last section, never inside it.
 
 ### Cards & Containers
 

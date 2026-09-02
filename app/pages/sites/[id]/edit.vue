@@ -50,6 +50,7 @@ async function handleDelete() {
         :initial="site"
         :submitting="submitting"
         :error-message="errorMessage"
+        :cancel-to="`/sites/${siteId}`"
         @submit="handleSubmit"
       />
       <button type="button" class="btn-secondary mt-6" @click="handleDelete">Delete site</button>

@@ -27,6 +27,7 @@ async function handleSubmit(payload: SiteInput) {
       class="mt-6"
       :submitting="submitting"
       :error-message="errorMessage"
+      cancel-to="/"
       @submit="handleSubmit"
     />
   </div>
