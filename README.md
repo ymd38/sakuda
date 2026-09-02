@@ -24,8 +24,8 @@ make env      # .env from .env.example with a fresh SAKUDA_ENCRYPTION_KEY
 make build    # build the image (10–20 min the first time)
 make up       # start → http://localhost:3001
 make logs     # follow logs · make restart · make ps
-make sakuda-down && make sakuda-up   # recreate only sakuda (e.g. after make build) — Juice Shop keeps running
-make down     # stops everything incl. Juice Shop, which resets its accounts on the next start
+make down && make up   # recreate sakuda (e.g. after make build)
+make down     # stops sakuda only — the data volume and Juice Shop are untouched
 ```
 
 `make help` lists every target. Without make:
@@ -46,11 +46,11 @@ docker run -d --name sakuda -p 127.0.0.1:3001:3000 --shm-size=1g \
 The container always listens on **3000**; the host-side ports come from
 `.env` so sakuda can coexist with other local stacks:
 
-| `.env` variable  | Default     | What                                                     |
-| ---------------- | ----------- | -------------------------------------------------------- |
-| `SAKUDA_PORT`    | `3001`      | sakuda UI/API (`make up`, `make dev`)                    |
-| `JUICESHOP_PORT` | `4001`      | OWASP Juice Shop dry-run target (`make juice-up`)        |
-| `SAKUDA_BIND`    | `127.0.0.1` | Bind address for published ports — keep it loopback-only |
+| `.env` variable  | Default     | What                                                                   |
+| ---------------- | ----------- | ---------------------------------------------------------------------- |
+| `SAKUDA_PORT`    | `3001`      | sakuda UI/API (`make up`, `make dev`)                                  |
+| `JUICESHOP_PORT` | `4001`      | OWASP Juice Shop dry-run target (`make juice-up`, own compose project) |
+| `SAKUDA_BIND`    | `127.0.0.1` | Bind address for published ports — keep it loopback-only               |
 
 Override per invocation with `make up SAKUDA_PORT=3005`.
 
@@ -129,8 +129,17 @@ make dev            # nuxt dev on SAKUDA_PORT → http://localhost:3001
 make test           # unit + component tests
 make e2e            # API e2e tests
 make lint · make typecheck · make check (all three)
-make juice-up       # Juice Shop on JUICESHOP_PORT as a scan target
+make juice-up       # Juice Shop on JUICESHOP_PORT as a scan target · make juice-down
 ```
+
+Juice Shop is a separate compose project (`targets/juice-shop/compose.yml`,
+project `sakuda-juice-shop`) that reads the same `.env`, so `make down` /
+`make reset-data` never touch it. Without make:
+`docker compose --env-file .env -f targets/juice-shop/compose.yml up -d`.
+Recreating the container (`make juice-down`) resets its accounts and tokens.
+Upgrading from a checkout where Juice Shop lived in `docker-compose.yml`:
+remove the old container once with `docker rm -f sakuda-juice-shop`, then
+`make juice-up`.
 
 (`pnpm dev --port 3001`, `pnpm test`, `pnpm test:e2e`, `pnpm run lint`,
 `pnpm run typecheck` underneath.)

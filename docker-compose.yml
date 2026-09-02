@@ -1,10 +1,12 @@
 # sakuda — single-container app. Host-side ports are read from .env
-# (see .env.example: SAKUDA_PORT / SAKUDA_BIND / JUICESHOP_PORT) so this stack
-# can coexist with other local stacks (internal-app on 3000/8080/5432,
-# other-stack on 3002/8082/3307, ...). Everything inside the container stays on 3000.
+# (see .env.example: SAKUDA_PORT / SAKUDA_BIND) so this stack can coexist with
+# other local stacks (internal-app on 3000/8080/5432, other-stack on
+# 3002/8082/3307, ...). Everything inside the container stays on 3000.
 #
 #   make up          start sakuda
-#   make juice-up    start the OWASP Juice Shop dry-run target (profile: dryrun)
+#
+# The OWASP Juice Shop dry-run target is a separate compose project:
+# targets/juice-shop/compose.yml (`make juice-up`).
 
 services:
   sakuda:
@@ -26,14 +28,6 @@ services:
     volumes:
       - sakuda-data:/data
     restart: unless-stopped
-
-  # Dry-run target only (`make juice-up`). Not started by `make up`.
-  juice-shop:
-    profiles: ['dryrun']
-    image: ${JUICESHOP_IMAGE:-bkimminich/juice-shop:latest}
-    container_name: sakuda-juice-shop
-    ports:
-      - '${SAKUDA_BIND:-127.0.0.1}:${JUICESHOP_PORT:-4001}:3000'
 
 volumes:
   sakuda-data:

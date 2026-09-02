@@ -1,0 +1,16 @@
+# OWASP Juice Shop — a dry-run target for sakuda, kept as its own compose
+# project so `make down` / `make reset-data` never touch it. Reads the same
+# .env as sakuda (SAKUDA_BIND / JUICESHOP_PORT / JUICESHOP_IMAGE):
+#
+#   make juice-up / make juice-down
+#   docker compose --env-file .env -f targets/juice-shop/compose.yml up -d   # without make
+#
+# Recreating the container resets Juice Shop's database (accounts, tokens).
+name: sakuda-juice-shop
+
+services:
+  juice-shop:
+    image: ${JUICESHOP_IMAGE:-bkimminich/juice-shop:latest}
+    container_name: sakuda-juice-shop
+    ports:
+      - '${SAKUDA_BIND:-127.0.0.1}:${JUICESHOP_PORT:-4001}:3000'
