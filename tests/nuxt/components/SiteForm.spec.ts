@@ -21,6 +21,7 @@ const editSite: SitePublic = {
   zapFeSpiderMaxMinutes: 5,
   nonLocalConfirmed: true,
   allowMutatingRequests: false,
+  nucleiEnabledRiskTags: [],
   headerNames: ['Authorization', 'X-Api-Key'],
   browserStorageNames: [],
   requiresConfirmation: true,
@@ -87,6 +88,26 @@ describe('SiteForm', () => {
     const events = wrapper.emitted('submit')
     const last = events?.[events.length - 1]?.[0]
     expect(SiteInputSchema.parse(last).allowMutatingRequests).toBe(true)
+  })
+
+  it('submits selected risk tags and disables them until active injection checks is on', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    await wrapper.find('[data-testid="name"]').setValue('Example')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
+
+    const fuzz = wrapper.find('[data-testid="risk-tag-fuzz"]')
+    expect((fuzz.element as HTMLInputElement).disabled).toBe(true)
+
+    await wrapper.find('[data-testid="allow-mutating-requests"]').setValue(true)
+    expect((fuzz.element as HTMLInputElement).disabled).toBe(false)
+    await fuzz.setValue(true)
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+
+    const events = wrapper.emitted('submit')
+    const last = events?.[events.length - 1]?.[0]
+    expect(SiteInputSchema.parse(last).nucleiEnabledRiskTags).toEqual(['fuzz'])
   })
 
   it('hides the non-local confirmation for a local frontBaseUrl', async () => {

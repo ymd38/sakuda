@@ -22,6 +22,7 @@ function siteRow(id: string) {
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: false,
     allowMutatingRequests: false,
+    nucleiEnabledRiskTags: [],
     headersEnc: null,
     headerNames: [],
     browserStorageNames: [],

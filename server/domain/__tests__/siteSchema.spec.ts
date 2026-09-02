@@ -27,7 +27,19 @@ describe('SiteInputSchema', () => {
       zapFeSpiderMaxMinutes: 5,
       nonLocalConfirmed: false,
       allowMutatingRequests: false,
+      nucleiEnabledRiskTags: [],
     })
+  })
+
+  it('defaults nucleiEnabledRiskTags to [] and rejects an unknown risk tag', () => {
+    const ok = SiteInputSchema.safeParse({ name: 's', frontBaseUrl: 'http://localhost:3000' })
+    expect(ok.success && ok.data.nucleiEnabledRiskTags).toEqual([])
+    const bad = SiteInputSchema.safeParse({
+      name: 's',
+      frontBaseUrl: 'http://localhost:3000',
+      nucleiEnabledRiskTags: ['fuzz', 'nope'],
+    })
+    expect(bad.success).toBe(false)
   })
 
   it('maps empty string to null for optional URLs', () => {
@@ -90,6 +102,7 @@ describe('SiteInputSchema', () => {
       frontBaseUrl: 'https://app.example.com',
       nonLocalConfirmed: true,
       allowMutatingRequests: false,
+      nucleiEnabledRiskTags: [],
     })
     expect(result.success).toBe(true)
   })

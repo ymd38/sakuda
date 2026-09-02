@@ -1,6 +1,12 @@
 import { blob, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import type { BrowserStorageName } from '#shared/schemas/browserStorage'
-import type { DiscoveredUrl, Engine, SeverityCounts, SiteSnapshot } from '#shared/types/api'
+import type {
+  DiscoveredUrl,
+  Engine,
+  RiskTag,
+  SeverityCounts,
+  SiteSnapshot,
+} from '#shared/types/api'
 
 export const sites = sqliteTable('sites', {
   id: text('id').primaryKey(),
@@ -20,6 +26,10 @@ export const sites = sqliteTable('sites', {
   allowMutatingRequests: integer('allow_mutating_requests', { mode: 'boolean' })
     .notNull()
     .default(false),
+  nucleiEnabledRiskTags: text('nuclei_enabled_risk_tags', { mode: 'json' })
+    .$type<RiskTag[]>()
+    .notNull()
+    .default([]),
   headersEnc: blob('headers_enc', { mode: 'buffer' }),
   headerNames: text('header_names', { mode: 'json' }).$type<string[]>().notNull(),
   browserStorageEnc: blob('browser_storage_enc', { mode: 'buffer' }),

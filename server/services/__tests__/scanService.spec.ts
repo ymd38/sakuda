@@ -64,6 +64,7 @@ function insertRawSite(overrides: Partial<typeof sites.$inferInsert> = {}) {
       zapFeSpiderMaxMinutes: 5,
       nonLocalConfirmed: false,
       allowMutatingRequests: false,
+      nucleiEnabledRiskTags: [],
       headersEnc: null,
       headerNames: [],
       browserStorageNames: [],

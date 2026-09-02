@@ -3,7 +3,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   countParameterizedUrls,
+  effectiveRiskTags,
   isActiveScanEnabled,
+  riskExcludeTags,
+  riskExtraTags,
   seedEmptyQueryValues,
 } from '../../domain/activeScan'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
@@ -20,10 +23,13 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   const originalHost = new URL(site.frontBaseUrl).hostname
   const targetsFile = join(workDir, 'targets.txt')
   const outputFile = join(workDir, 'findings.jsonl')
-  const tags = nucleiTagsFor(site.headers.length > 0)
   // The single source of truth for "may this scan attack the target" —
   // never decided here, only read (see domain/activeScan).
   const activeScan = isActiveScanEnabled(site)
+  // Risk-template groups the user opted this site into (empty unless active);
+  // each adds its templates back via -tags and lifts them from -exclude-tags.
+  const riskTags = effectiveRiskTags(site)
+  const tags = [...nucleiTagsFor(site.headers.length > 0), ...riskExtraTags(riskTags)]
   const parameterizedUrlCount = countParameterizedUrls(urls)
   // Active runs seed empty query values (`?q=` → `?q=1`) so the DAST fuzzer
   // has something to mutate; only the transient targets file changes, not
@@ -42,6 +48,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
     concurrency: 25,
     tags,
     headers: site.headers,
+    excludeTags: riskExcludeTags(riskTags),
     ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
   })
   logger.info(
@@ -52,6 +59,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       excludedCount: excluded.length,
       tags,
       activeScan,
+      riskTags,
       parameterizedUrlCount,
       rateLimit: site.nucleiRateLimit,
       headerNames: site.headerNames,
@@ -113,6 +121,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       concurrency: 25,
       templatesDir: env.nuclei.templatesDir,
       activeScan,
+      riskTags,
       ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
       parameterizedUrlCount,
       stats,

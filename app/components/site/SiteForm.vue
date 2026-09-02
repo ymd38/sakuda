@@ -4,7 +4,7 @@ import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
 import { BROWSER_STORAGE_KINDS } from '#shared/schemas/browserStorage'
 import type { Header } from '#shared/schemas/headers'
 import type { SiteInput } from '#shared/schemas/site'
-import type { SitePublic } from '#shared/types/api'
+import type { RiskTag, SitePublic } from '#shared/types/api'
 
 const props = defineProps<{
   initial?: SitePublic
@@ -31,7 +31,28 @@ const form = reactive({
   zapFeSpiderMaxMinutes: props.initial?.zapFeSpiderMaxMinutes ?? 5,
   nonLocalConfirmed: props.initial?.nonLocalConfirmed ?? false,
   allowMutatingRequests: props.initial?.allowMutatingRequests ?? false,
+  nucleiEnabledRiskTags: [...(props.initial?.nucleiEnabledRiskTags ?? [])] as RiskTag[],
 })
+
+/** nuclei risk-template groups the user can opt into (see server/domain/activeScan);
+ * each is excluded by default and needs Active injection checks on to take effect. */
+const RISK_TAG_GROUPS: { tag: RiskTag; label: string; help: string }[] = [
+  {
+    tag: 'intrusive',
+    label: 'Known CVE exploit checks',
+    help: 'runs the intrusive CVE templates that send a real exploit attempt.',
+  },
+  {
+    tag: 'fuzz',
+    label: 'Command injection / RCE',
+    help: 'fuzzes for OS command execution — can run commands on the target host.',
+  },
+  {
+    tag: 'dos',
+    label: 'Denial of service (dangerous)',
+    help: 'sends templates that may crash or hang the target. Leave off unless you can afford downtime.',
+  },
+]
 
 // `shared/utils/localHost.ts` — auto-imported from `shared/utils/*`. A blank
 // or unparsable frontBaseUrl must not show the confirmation gate on a fresh
@@ -138,6 +159,7 @@ function buildPayload(): SiteInput {
     zapFeSpiderMaxMinutes: toFiniteNumber(form.zapFeSpiderMaxMinutes, 5),
     nonLocalConfirmed: form.nonLocalConfirmed,
     allowMutatingRequests: form.allowMutatingRequests,
+    nucleiEnabledRiskTags: form.nucleiEnabledRiskTags,
   }
   return {
     ...base,
@@ -408,6 +430,33 @@ function handleSubmit() {
         query parameters, e.g. "/search?q=". Only enable this for an environment you own and can
         reset; it may corrupt or delete data.
       </p>
+
+      <div class="flex flex-col gap-2 border-t border-hairline-soft pt-3">
+        <span class="text-caption-md font-medium text-ink">Extra risk template groups</span>
+        <p class="text-caption-sm text-mute">
+          Normally excluded even in active mode. Each needs Active injection checks on to take
+          effect.
+        </p>
+        <label
+          v-for="group in RISK_TAG_GROUPS"
+          :key="group.tag"
+          class="flex items-start gap-3"
+          :class="{ 'opacity-50': !form.allowMutatingRequests }"
+        >
+          <input
+            v-model="form.nucleiEnabledRiskTags"
+            :value="group.tag"
+            :data-testid="`risk-tag-${group.tag}`"
+            type="checkbox"
+            :disabled="!form.allowMutatingRequests"
+            class="mt-1"
+          />
+          <span class="text-caption-sm">
+            <span class="font-medium text-ink">{{ group.label }}</span>
+            <span class="text-mute"> — {{ group.help }}</span>
+          </span>
+        </label>
+      </div>
     </div>
 
     <div class="flex flex-col gap-3">

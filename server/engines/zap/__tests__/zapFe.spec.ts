@@ -32,6 +32,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: false,
     allowMutatingRequests: false,
+    nucleiEnabledRiskTags: [],
     headerNames: [],
     browserStorageNames: [],
     requiresConfirmation: false,

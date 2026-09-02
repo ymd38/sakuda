@@ -55,6 +55,8 @@ function nucleiRows(meta: Record<string, unknown>): string[] {
     const parameterizedUrlCount = metaNumber(meta, 'parameterizedUrlCount')
     if (parameterizedUrlCount !== undefined)
       rows.push(`| Fuzzable URLs (with query params) | ${parameterizedUrlCount} |`)
+    const riskTags = metaStringArray(meta, 'riskTags')
+    if (riskTags && riskTags.length > 0) rows.push(`| Risk groups | ${code(riskTags.join(','))} |`)
   }
   const stats = metaRecord(meta, 'stats')
   if (stats) {

@@ -97,3 +97,30 @@ describe('buildNucleiArgs with active checks (dastTemplatesDir)', () => {
     expect(buildNucleiArgs(base).filter((a) => a === '-t')).toHaveLength(1)
   })
 })
+
+describe('buildNucleiArgs excludeTags', () => {
+  const base = {
+    targetsFile: 't.txt',
+    templatesDir: '/tpl',
+    outputFile: 'o.jsonl',
+    rateLimit: 50,
+    concurrency: 25,
+    tags: ['sqli'],
+    headers: [],
+  }
+  const excludeOf = (args: string[]) => args[args.indexOf('-exclude-tags') + 1]
+
+  it('defaults -exclude-tags to all three risk tags when none is passed', () => {
+    expect(excludeOf(buildNucleiArgs(base))).toBe('dos,fuzz,intrusive')
+  })
+
+  it('joins the provided excludeTags list (a risk group opted back in)', () => {
+    expect(excludeOf(buildNucleiArgs({ ...base, excludeTags: ['dos', 'intrusive'] }))).toBe(
+      'dos,intrusive',
+    )
+  })
+
+  it('emits an empty -exclude-tags value when every risk group is enabled', () => {
+    expect(excludeOf(buildNucleiArgs({ ...base, excludeTags: [] }))).toBe('')
+  })
+})

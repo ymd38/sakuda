@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   countParameterizedUrls,
+  effectiveRiskTags,
   FUZZ_SEED_VALUE,
   isActiveScanEnabled,
+  riskExcludeTags,
+  riskExtraTags,
   seedEmptyQueryValues,
 } from '../activeScan'
+import type { RiskTag } from '#shared/types/api'
 
 describe('isActiveScanEnabled', () => {
   it('is off by default (no opt-in) even for a local site', () => {
@@ -13,6 +17,7 @@ describe('isActiveScanEnabled', () => {
         allowMutatingRequests: false,
         requiresConfirmation: false,
         nonLocalConfirmed: false,
+        nucleiEnabledRiskTags: [],
       }),
     ).toBe(false)
   })
@@ -23,6 +28,7 @@ describe('isActiveScanEnabled', () => {
         allowMutatingRequests: true,
         requiresConfirmation: false,
         nonLocalConfirmed: false,
+        nucleiEnabledRiskTags: [],
       }),
     ).toBe(true)
   })
@@ -33,6 +39,7 @@ describe('isActiveScanEnabled', () => {
         allowMutatingRequests: true,
         requiresConfirmation: true,
         nonLocalConfirmed: true,
+        nucleiEnabledRiskTags: [],
       }),
     ).toBe(true)
   })
@@ -43,6 +50,7 @@ describe('isActiveScanEnabled', () => {
         allowMutatingRequests: true,
         requiresConfirmation: true,
         nonLocalConfirmed: false,
+        nucleiEnabledRiskTags: [],
       }),
     ).toBe(false)
   })
@@ -93,5 +101,71 @@ describe('seedEmptyQueryValues', () => {
 
   it('returns an unparsable entry unchanged rather than dropping it', () => {
     expect(seedEmptyQueryValues(['not a url'])).toEqual(['not a url'])
+  })
+})
+
+describe('effectiveRiskTags', () => {
+  const on = (nucleiEnabledRiskTags: RiskTag[]) => ({
+    allowMutatingRequests: true,
+    requiresConfirmation: false,
+    nonLocalConfirmed: false,
+    nucleiEnabledRiskTags,
+  })
+
+  it('returns the selected tags in canonical order when active checks are on', () => {
+    expect(effectiveRiskTags(on(['fuzz', 'intrusive']))).toEqual(['fuzz', 'intrusive'])
+    // input order does not matter; RISK_TAGS order (dos, fuzz, intrusive) wins
+    expect(effectiveRiskTags(on(['intrusive', 'dos']))).toEqual(['dos', 'intrusive'])
+  })
+
+  it('is empty when the opt-in is off, even if tags are selected (stale snapshot cannot re-open)', () => {
+    expect(
+      effectiveRiskTags({
+        allowMutatingRequests: false,
+        requiresConfirmation: false,
+        nonLocalConfirmed: false,
+        nucleiEnabledRiskTags: ['fuzz', 'dos', 'intrusive'],
+      }),
+    ).toEqual([])
+  })
+
+  it('is empty when a non-local host is not confirmed', () => {
+    expect(
+      effectiveRiskTags({
+        allowMutatingRequests: true,
+        requiresConfirmation: true,
+        nonLocalConfirmed: false,
+        nucleiEnabledRiskTags: ['fuzz'],
+      }),
+    ).toEqual([])
+  })
+})
+
+describe('riskExcludeTags', () => {
+  it('excludes all three risk tags when nothing is enabled (the default)', () => {
+    expect(riskExcludeTags([])).toEqual(['dos', 'fuzz', 'intrusive'])
+  })
+
+  it('drops only the enabled tags from the exclusion', () => {
+    expect(riskExcludeTags(['fuzz'])).toEqual(['dos', 'intrusive'])
+    expect(riskExcludeTags(['dos', 'fuzz', 'intrusive'])).toEqual([])
+  })
+})
+
+describe('riskExtraTags', () => {
+  it('adds nothing for intrusive (its CVE templates already match the base allow-list)', () => {
+    expect(riskExtraTags(['intrusive'])).toEqual([])
+  })
+
+  it('adds cmdi,rce for fuzz so command-injection/RCE templates actually load', () => {
+    expect(riskExtraTags(['fuzz'])).toEqual(['cmdi', 'rce'])
+  })
+
+  it('adds dos for dos, and dedupes across groups', () => {
+    expect(riskExtraTags(['dos', 'fuzz', 'intrusive'])).toEqual(['dos', 'cmdi', 'rce'])
+  })
+
+  it('adds nothing when no group is enabled', () => {
+    expect(riskExtraTags([])).toEqual([])
   })
 })

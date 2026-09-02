@@ -18,6 +18,7 @@ const siteSnapshot: SiteSnapshot = {
   zapFeSpiderMaxMinutes: 5,
   nonLocalConfirmed: true,
   allowMutatingRequests: false,
+  nucleiEnabledRiskTags: [],
   headerNames: ['Authorization'],
   browserStorageNames: [],
   requiresConfirmation: false,
@@ -235,6 +236,19 @@ describe('buildScanMarkdown', () => {
 
   it('omits the Active checks row when meta.activeScan is false or absent', () => {
     expect(lines.some((l) => l.startsWith('| Active checks'))).toBe(false)
+  })
+
+  it('renders the Risk groups row when meta.riskTags is non-empty', () => {
+    const md = buildScanMarkdown({
+      ...detail,
+      engineRuns: [
+        {
+          ...nucleiRun,
+          meta: { ...nucleiRun.meta, activeScan: true, riskTags: ['fuzz', 'intrusive'] },
+        },
+      ],
+    })
+    expect(md.split('\n')).toContain('| Risk groups | `fuzz,intrusive` |')
   })
 
   it('renders the Active checks (DAST) and fuzzable-URL rows when meta.activeScan is true', () => {

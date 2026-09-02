@@ -29,6 +29,13 @@
       "when": 1788279226709,
       "tag": "0003_allow_mutating_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788326354091,
+      "tag": "0004_nuclei_risk_tags",
+      "breakpoints": true
     }
   ]
 }

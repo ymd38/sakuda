@@ -63,6 +63,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: false,
     allowMutatingRequests: false,
+    nucleiEnabledRiskTags: [],
     headerNames: [],
     browserStorageNames: [],
     requiresConfirmation: false,
@@ -283,6 +284,23 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     expect(out.warnings).toEqual([])
   })
 
+  it('opts a risk group back in: -exclude-tags drops it and -tags gains its extra tags', async () => {
+    const { argv } = await run(
+      baseSite({ allowMutatingRequests: true, nucleiEnabledRiskTags: ['fuzz'] }),
+    )
+    const exclude = argv[argv.indexOf('-exclude-tags') + 1]
+    const tags = argv[argv.indexOf('-tags') + 1]
+    expect(exclude).toBe('dos,intrusive')
+    expect(tags).toContain('cmdi')
+    expect(tags).toContain('rce')
+  })
+
+  it('ignores selected risk tags while the opt-in is off (exclusion stays full)', async () => {
+    const { argv } = await run(baseSite({ nucleiEnabledRiskTags: ['fuzz', 'dos'] }))
+    expect(argv[argv.indexOf('-exclude-tags') + 1]).toBe('dos,fuzz,intrusive')
+    expect(argv).not.toContain('cmdi')
+  })
+
   it('warns when opted in but no saved target carries query parameters', async () => {
     const { out, argv } = await run(baseSite({ allowMutatingRequests: true }))
     expect(argv).toContain('-dast')
@@ -297,6 +315,7 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
         requiresConfirmation: true,
         nonLocalConfirmed: false,
         allowMutatingRequests: true,
+        nucleiEnabledRiskTags: [],
       }),
     )
     expect(argv).not.toContain('-dast')

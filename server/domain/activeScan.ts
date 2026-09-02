@@ -1,8 +1,9 @@
-import type { SitePublic } from '#shared/types/api'
+import type { RiskTag, SitePublic } from '#shared/types/api'
+import { RISK_TAGS } from '#shared/types/api'
 
 export type ActiveScanSite = Pick<
   SitePublic,
-  'allowMutatingRequests' | 'requiresConfirmation' | 'nonLocalConfirmed'
+  'allowMutatingRequests' | 'requiresConfirmation' | 'nonLocalConfirmed' | 'nucleiEnabledRiskTags'
 >
 
 /**
@@ -20,6 +21,47 @@ export type ActiveScanSite = Pick<
 export function isActiveScanEnabled(site: ActiveScanSite): boolean {
   if (!site.allowMutatingRequests) return false
   return !site.requiresConfirmation || site.nonLocalConfirmed
+}
+
+/**
+ * Extra `-tags` each risk toggle must add for the templates it unlocks to
+ * actually load. Measured against nuclei-templates v10.4.8: dropping a tag
+ * from `-exclude-tags` alone is not enough when the templates it unlocks also
+ * sit outside the base `-tags` allow-list (see {@link riskExcludeTags}).
+ *
+ * - `intrusive` — none; the `http/cves/*` checks it unlocks already match the
+ *   base allow-list, so they load once the exclusion is lifted.
+ * - `fuzz` — `cmdi,rce`; the command-injection / RCE DAST templates carry
+ *   those tags and would otherwise be filtered out by `-tags`.
+ * - `dos` — `dos`; DoS templates match no base tag, so the tag must be added.
+ */
+const RISK_EXTRA_TAGS: Record<RiskTag, readonly string[]> = {
+  intrusive: [],
+  fuzz: ['cmdi', 'rce'],
+  dos: ['dos'],
+}
+
+/**
+ * The risk-template groups this scan may actually enable: the site's selected
+ * tags, but only when active checks are on. With the opt-in off the result is
+ * always empty — a stale `nucleiEnabledRiskTags` can never re-open the
+ * excluded groups on its own. Returned in the fixed {@link RISK_TAGS} order.
+ */
+export function effectiveRiskTags(site: ActiveScanSite): RiskTag[] {
+  if (!isActiveScanEnabled(site)) return []
+  return RISK_TAGS.filter((t) => site.nucleiEnabledRiskTags.includes(t))
+}
+
+/** The `-exclude-tags` value for a run: the three risk tags minus the ones
+ * enabled. Empty `enabled` returns all three — the default, unchanged. */
+export function riskExcludeTags(enabled: readonly RiskTag[]): string[] {
+  return RISK_TAGS.filter((t) => !enabled.includes(t))
+}
+
+/** Tags that must be added to `-tags` so the enabled groups' templates load
+ * (see {@link RISK_EXTRA_TAGS}). Deduped; empty when nothing is enabled. */
+export function riskExtraTags(enabled: readonly RiskTag[]): string[] {
+  return [...new Set(enabled.flatMap((t) => RISK_EXTRA_TAGS[t]))]
 }
 
 /** How many target URLs carry query parameters — the only inputs nuclei's

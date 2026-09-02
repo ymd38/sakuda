@@ -20,6 +20,7 @@ function siteFixture(overrides: Partial<SiteListItem> = {}): SiteListItem {
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: true,
     allowMutatingRequests: false,
+    nucleiEnabledRiskTags: [],
     headerNames: [],
     browserStorageNames: [],
     requiresConfirmation: true,

@@ -1,6 +1,8 @@
 import type { BrowserStorageName } from '../schemas/browserStorage'
 
 export type Engine = 'nuclei' | 'zap-api' | 'zap-fe'
+export const RISK_TAGS = ['dos', 'fuzz', 'intrusive'] as const
+export type RiskTag = (typeof RISK_TAGS)[number]
 export type Severity = 'critical' | 'high' | 'medium'
 export type SeverityLevel = Severity | 'low' | 'info'
 export interface SeverityCounts {
@@ -29,6 +31,9 @@ export interface SitePublic {
   nonLocalConfirmed: boolean
   /** Opt-in for active injection checks; effective only with ownership established. */
   allowMutatingRequests: boolean
+  /** nuclei risk-template groups the user opted this site into; effective only
+   * with active checks on (see server/domain/activeScan). */
+  nucleiEnabledRiskTags: RiskTag[]
   headerNames: string[]
   /** kind + name of each injected browser-storage item; values are write-only. */
   browserStorageNames: BrowserStorageName[]

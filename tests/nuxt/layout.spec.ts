@@ -20,6 +20,7 @@ function siteFixture(id: string, name: string): SiteListItem {
     zapFeSpiderMaxMinutes: 5,
     nonLocalConfirmed: true,
     allowMutatingRequests: false,
+    nucleiEnabledRiskTags: [],
     headerNames: [],
     browserStorageNames: [],
     requiresConfirmation: false,

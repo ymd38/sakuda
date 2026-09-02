@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { RISK_TAGS } from '../types/api'
 import { BrowserStorageSchema } from './browserStorage'
 import { HeadersSchema } from './headers'
 import { siteRequiresConfirmation } from '../utils/localHost'
@@ -39,6 +40,9 @@ export const SiteInputSchema = z
      * default: a scan then sends passive + signature requests only. See
      * `server/domain/activeScan.ts` for the effective decision. */
     allowMutatingRequests: z.boolean().default(false),
+    /** nuclei risk-template groups to un-exclude, effective only under
+     * allowMutatingRequests (see server/domain/activeScan). */
+    nucleiEnabledRiskTags: z.array(z.enum(RISK_TAGS)).default([]),
     headers: HeadersSchema.optional(),
     /** Injected into ZAP's browser before the Ajax spider runs (SPA login state). */
     browserStorage: BrowserStorageSchema.optional(),

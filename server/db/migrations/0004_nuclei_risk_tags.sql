@@ -1,0 +1,1 @@
+ALTER TABLE `sites` ADD `nuclei_enabled_risk_tags` text DEFAULT '[]' NOT NULL;
