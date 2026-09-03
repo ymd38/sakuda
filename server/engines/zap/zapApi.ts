@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../domain/excludePaths'
+import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildZapApiPlan, planToYaml, ZAP_REPORT_JSON } from './plan'
@@ -30,7 +30,7 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
     openapiSource = 'url'
   }
 
-  const excludeRegexes = parseExcludePatterns(site.excludePaths).map(toZapExcludeRegex)
+  const excludeRegexes = zapExcludeRegexes(site.excludePaths)
   const passiveMaxMinutes = 5
   const plan = buildZapApiPlan({
     context: {

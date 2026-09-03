@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeScan'
-import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../domain/excludePaths'
+import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { zapFeHashRouteTargets, zapFeRequestTargets } from '../../domain/nucleiTargets'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
@@ -35,7 +35,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   const originalHost = new URL(site.frontBaseUrl).hostname
   const base = rewriteLoopbackHost(site.frontBaseUrl + '/', alias).replace(/\/$/, '')
   const seedUrl = joinUrl(base, site.zapFeSeedPath)
-  const excludeRegexes = parseExcludePatterns(site.excludePaths).map(toZapExcludeRegex)
+  const excludeRegexes = zapExcludeRegexes(site.excludePaths)
   const passiveMaxMinutes = 5
   const hasBrowserStorage = site.browserStorage.length > 0
   // The single source of truth for "may this scan attack the target" —

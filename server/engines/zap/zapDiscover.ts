@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { isApiCall, normalizeCrawledEntries, spaLikelyDidNotStart } from '../../domain/crawledUrls'
-import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../domain/excludePaths'
+import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { EngineError, OOM_RUNBOOK, type DiscoverRunner } from '../types'
 import {
@@ -47,7 +47,7 @@ export const runZapDiscover: DiscoverRunner = async ({
     : null
   const seedPaths = resolveDiscoverySeeds(site)
   const seedUrls = seedPaths.map((p) => joinUrl(front, p))
-  const excludeRegexes = parseExcludePatterns(site.excludePaths).map(toZapExcludeRegex)
+  const excludeRegexes = zapExcludeRegexes(site.excludePaths)
   const origins = [front, ...(api ? [api] : [])]
   const hasBrowserStorage = site.browserStorage.length > 0
   const plan = buildZapDiscoverPlan({

@@ -1,4 +1,4 @@
-import { parseExcludePatterns, pathMatchesAny } from './excludePaths'
+import { parseExcludePatterns, pathMatchesAny, SCAN_NOISE_GLOBS } from './excludePaths'
 
 /** The subset of a site a crawl result is filtered against. */
 export interface CrawlScopeSite {
@@ -29,11 +29,10 @@ const ASSET_EXTENSIONS = new Set([
 
 const DEV_NOISE_PREFIXES = ['/_nuxt/', '/@fs/', '/@vite/', '/node_modules/']
 
-/** Paths a crawler picks up that are never worth a scanner's time:
- * socket.io transport endpoints (one URL per polling round-trip, all
- * ephemeral) and "paths" that are really stack-trace locations scraped out
- * of an error page body (`/build/routes/fileServer.js:69:18`). */
-const NOISE_PREFIXES = ['/socket.io/', '/socket.io']
+/** Beyond {@link SCAN_NOISE_GLOBS}, a crawler also picks up "paths" that are
+ * really stack-trace locations scraped out of an error page body
+ * (`/build/routes/fileServer.js:69:18`). Those exist only in that body, so
+ * unlike the shared globs they are not worth excluding in ZAP's context. */
 const STACK_TRACE_SUFFIX = /:\d+:\d+$/
 
 function isAsset(pathname: string): boolean {
@@ -88,9 +87,7 @@ export function spaLikelyDidNotStart(
 
 function isNoise(pathname: string): boolean {
   const lower = pathname.toLowerCase()
-  return (
-    NOISE_PREFIXES.some((p) => lower === p || lower.startsWith(p)) || STACK_TRACE_SUFFIX.test(lower)
-  )
+  return pathMatchesAny(lower, SCAN_NOISE_GLOBS) || STACK_TRACE_SUFFIX.test(lower)
 }
 
 export type CrawledUrlDropReason = 'invalid' | 'sameOriginOnly' | 'asset' | 'noise' | 'excluded'

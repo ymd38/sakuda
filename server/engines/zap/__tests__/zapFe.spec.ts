@@ -86,6 +86,12 @@ describe('runZapFe', () => {
       .jobs
     const spider = jobs.find((j) => j.type === 'spider')
     expect(spider?.parameters.url).toBe('http://host.docker.internal:3000/')
+    // Even with no excludePaths configured, socket.io stays out of the scan
+    // scope — left in, the active scan stalls ~30s per rule on the transport.
+    // as: plan is Record<string, unknown> at runtime; narrow just enough for the context
+    const context = (plan as { env: { contexts: Array<{ excludePaths: string[] }> } }).env
+      .contexts[0]
+    expect(context?.excludePaths).toEqual(['^https?://[^/]+/socket\\.io.*(\\?.*)?$'])
     // default: passive only — no activeScan job, and the report says so
     expect(jobs.some((j) => j.type === 'activeScan')).toBe(false)
     expect(out.meta.activeScan).toBe(false)

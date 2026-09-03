@@ -45,7 +45,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
 }
 
 interface PlanShape {
-  env: { contexts: Array<{ includePaths: string[] }> }
+  env: { contexts: Array<{ includePaths: string[]; excludePaths: string[] }> }
   jobs: Array<{ type: string; parameters: Record<string, unknown> }>
 }
 
@@ -131,6 +131,13 @@ describe('runZapDiscover', () => {
     expect(jobs[3]?.parameters.file).toBe(join(workDir, 'dump-site-tree.js'))
     expect(planEnv.contexts[0]?.includePaths).toEqual([
       '^http:\\/\\/host\\.docker\\.internal:3000(/.*)?$',
+    ])
+    // The site's own excludePaths, plus the always-on scan noise (socket.io):
+    // dropping it from the discovered URLs is not enough, it has to leave the
+    // spider's scope too.
+    expect(planEnv.contexts[0]?.excludePaths).toEqual([
+      '^https?://[^/]+/admin/.*(\\?.*)?$',
+      '^https?://[^/]+/socket\\.io.*(\\?.*)?$',
     ])
     const script = readFileSync(join(workDir, 'dump-site-tree.js'), 'utf8')
     expect(script).toContain(JSON.stringify(join(workDir, 'site-tree.jsonl')))
