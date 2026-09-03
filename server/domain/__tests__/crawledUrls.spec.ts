@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { classifyCrawledUrl, normalizeCrawledUrls, type CrawlScopeSite } from '../crawledUrls'
+import {
+  classifyCrawledUrl,
+  isApiCall,
+  normalizeCrawledUrls,
+  spaLikelyDidNotStart,
+  type CrawlScopeSite,
+} from '../crawledUrls'
 
 const site: CrawlScopeSite = {
   frontBaseUrl: 'http://localhost:3000',
@@ -97,5 +103,48 @@ describe('normalizeCrawledUrls', () => {
       urls: [],
       dropped: { invalid: 0, sameOriginOnly: 0, asset: 0, noise: 0, excluded: 0, capped: 0 },
     })
+  })
+})
+
+describe('isApiCall', () => {
+  it('treats clear API signals as API calls', () => {
+    expect(isApiCall('POST', 'http://localhost:3000/login')).toBe(true) // non-GET
+    expect(isApiCall('GET', 'http://localhost:3000/api/users')).toBe(true)
+    expect(isApiCall('GET', 'http://localhost:3000/rest/basket/6')).toBe(true)
+    expect(isApiCall('GET', 'http://localhost:3000/graphql')).toBe(true)
+    expect(isApiCall('GET', 'http://localhost:3000/data/config.json')).toBe(true)
+    expect(isApiCall('GET', 'http://localhost:3000/rest/products/search?q=')).toBe(true) // /rest marker
+  })
+
+  it('does not treat assets, HTML pages, or extensionless GET routes as API calls (warn side)', () => {
+    expect(isApiCall('GET', 'http://localhost:3000/_nuxt/entry.js')).toBe(false) // asset
+    expect(isApiCall('GET', 'http://localhost:3000/main.css')).toBe(false) // asset
+    expect(isApiCall('GET', 'http://localhost:3000/')).toBe(false) // root HTML
+    expect(isApiCall('GET', 'http://localhost:3000/about')).toBe(false) // SPA route / HTML
+    // a query string alone is not a signal: page navigations carry them too,
+    // and counting one as an API call would wrongly suppress the warning
+    expect(isApiCall('GET', 'http://localhost:3000/about?ref=x')).toBe(false)
+  })
+
+  it('classifies an unparsable URL as not an API call', () => {
+    expect(isApiCall('GET', 'not a url')).toBe(false)
+  })
+})
+
+describe('spaLikelyDidNotStart', () => {
+  const asset = { method: 'GET', url: 'http://localhost:3000/_nuxt/entry.js' }
+  const html = { method: 'GET', url: 'http://localhost:3000/about' }
+  const api = { method: 'GET', url: 'http://localhost:3000/rest/products/search?q=' }
+
+  it('(a) is false when at least one Ajax entry is an API call', () => {
+    expect(spaLikelyDidNotStart([html, api])).toBe(false)
+  })
+
+  it('(b) is true when Ajax entries are only assets / HTML pages', () => {
+    expect(spaLikelyDidNotStart([asset, html])).toBe(true)
+  })
+
+  it('(c) is false when there are no Ajax entries at all (no duplicate of the empty-crawl warning)', () => {
+    expect(spaLikelyDidNotStart([])).toBe(false)
   })
 })

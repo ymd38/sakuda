@@ -43,6 +43,49 @@ function isAsset(pathname: string): boolean {
   return DEV_NOISE_PREFIXES.some((p) => lower.includes(p))
 }
 
+/** Path segments that mark a request as an app-initiated API call. */
+const API_PATH_MARKERS = /\/(api|rest|graphql)(\/|$)/
+
+/**
+ * Heuristic for "the running app fetched this from its own backend" — an
+ * XHR/fetch rather than a document navigation or an asset. Used to tell
+ * whether a SPA actually started (see {@link spaLikelyDidNotStart}); it reads
+ * only the method and URL, never a response body.
+ *
+ * Biased toward *missing* an API rather than a false alarm: only clear signals
+ * count (a non-GET method, an `/api`|`/rest`|`/graphql` segment, or a `.json`
+ * path). A plain GET without one of those — `/about`, and even `/about?ref=x`
+ * — is treated as an HTML navigation, not an API, so a crawl that only moved
+ * between pages still triggers the warning. (A query string alone is not a
+ * signal: page navigations carry them too, and counting one as an API call
+ * would wrongly suppress the warning.) An unparsable URL is not an API call.
+ */
+export function isApiCall(method: string, url: string): boolean {
+  if (!URL.canParse(url)) return false
+  const u = new URL(url)
+  if (isAsset(u.pathname)) return false
+  if (method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD') return true
+  const lower = u.pathname.toLowerCase()
+  if (API_PATH_MARKERS.test(lower)) return true
+  if (lower.endsWith('.json')) return true
+  return false
+}
+
+/**
+ * True when the Ajax spider ran (there are Ajax-sourced entries) but the app
+ * made no client-side API call — the SPA likely never booted or is still
+ * anonymous, which otherwise looks like a clean, empty-of-findings crawl.
+ * Returns false when there are no Ajax entries at all: that is a different
+ * situation (the browser never crawled) already covered by other warnings, and
+ * we do not want to duplicate it.
+ */
+export function spaLikelyDidNotStart(
+  ajaxEntries: ReadonlyArray<{ method: string; url: string }>,
+): boolean {
+  if (ajaxEntries.length === 0) return false
+  return !ajaxEntries.some((e) => isApiCall(e.method, e.url))
+}
+
 function isNoise(pathname: string): boolean {
   const lower = pathname.toLowerCase()
   return (

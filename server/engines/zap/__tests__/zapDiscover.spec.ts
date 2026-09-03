@@ -288,6 +288,49 @@ describe('runZapDiscover', () => {
     }
   })
 
+  it('warns when the Ajax spider ran but the app made no client-side API calls (SPA not started)', async () => {
+    // type 2 = spider, type 10 = ajax. Ajax entries here are only an asset and
+    // an HTML page — no API call — so the SPA-not-started warning must fire.
+    const dump = join(tmp, 'no-api.jsonl')
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(
+      dump,
+      [
+        JSON.stringify({ method: 'GET', url: 'http://localhost:3000/', type: 2, status: 200 }),
+        JSON.stringify({
+          method: 'GET',
+          url: 'http://localhost:3000/_nuxt/entry.js',
+          type: 10,
+          status: 200,
+        }),
+        JSON.stringify({
+          method: 'GET',
+          url: 'http://localhost:3000/about',
+          type: 10,
+          status: 200,
+        }),
+      ].join('\n'),
+    )
+    const fakeBin = writeFakeZap(tmp, dump, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+
+    const out = await runZapDiscover({
+      discoveryId: 'disc-spa',
+      site: baseSite(),
+      workDir: join(tmp, 'work'),
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    expect(out.warnings.some((w) => w.includes('made no client-side API calls'))).toBe(true)
+    expect(out.meta.ajaxApiCallCount).toBe(0)
+  })
+
   it('warns when the crawl requested nothing at all', async () => {
     const empty = join(tmp, 'empty.jsonl')
     const { writeFileSync } = await import('node:fs')

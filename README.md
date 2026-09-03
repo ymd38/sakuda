@@ -189,6 +189,20 @@ Juice Shop that is `localStorage token = <JWT>` plus `sessionStorage bid =
 as `/#/search?q=apple` are fine) start one Ajax spider each; empty falls
 back to the ZAP frontend seed path.
 
+**"The app made no client-side API calls" warning.** A discovery whose Ajax
+spider ran but produced no app-initiated API call (only assets and HTML
+pages) usually means the SPA never booted or stayed anonymous — which
+otherwise looks like a clean crawl with no warnings. Discovery flags it so
+repeated empty runs are not mistaken for success. Check, in order: the
+secure-context alias (`SAKUDA_ZAP_LOCALHOST_ALIAS`, needed so
+`crypto.randomUUID` and friends work over a loopback origin), the site's
+**Browser storage** login values, and — importantly — that the app's own
+JavaScript is not being excluded. **Do not put `/_nuxt/*` (or your
+framework's asset path) in `excludePaths` on a dev server:** ZAP will refuse
+to fetch the bundle, the SPA cannot start, and every discovery comes back
+empty. `excludePaths` is for endpoints that end the session or change data,
+not for static assets (those are dropped from the target list automatically).
+
 A site runs one job at a time: a discovery is refused while a scan is
 queued/running and vice versa. Discovery artifacts (ZAP plan, logs, the
 site-tree dump) live under `<data dir>/discoveries/<id>` and are removed with

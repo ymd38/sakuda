@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { normalizeCrawledEntries } from '../../domain/crawledUrls'
+import { isApiCall, normalizeCrawledEntries, spaLikelyDidNotStart } from '../../domain/crawledUrls'
 import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { EngineError, OOM_RUNBOOK, type DiscoverRunner } from '../types'
@@ -125,10 +125,16 @@ export const runZapDiscover: DiscoverRunner = async ({
     source: historyTypeToSource(entry.type),
   }))
   const authFailureCount = dump.entries.filter((e) => e.status === 401 || e.status === 403).length
+  // Ajax-spider entries only — the ones a running SPA would have produced.
+  const ajaxEntries = dump.entries.filter((e) => historyTypeToSource(e.type) === 'ajax')
   const warnings: string[] = []
   if (dump.entries.length === 0)
     warnings.push(
       'the crawl requested no URLs — verify the target is reachable from ZAP and the seed path is right',
+    )
+  if (spaLikelyDidNotStart(ajaxEntries))
+    warnings.push(
+      'the Ajax spider ran but the app made no client-side API calls — the SPA likely did not start or is still anonymous. Check: the secure-context alias, the browser-storage login values, and that the app JS (e.g. /_nuxt/*) is not in excludePaths',
     )
   if (authFailureCount > 0)
     warnings.push(`${authFailureCount} request(s) got 401/403 — headers may be missing or expired`)
@@ -156,6 +162,7 @@ export const runZapDiscover: DiscoverRunner = async ({
       urlCount: urls.length,
       dropped,
       authFailureCount,
+      ajaxApiCallCount: ajaxEntries.filter((e) => isApiCall(e.method, e.url)).length,
       excludeRegexes,
       durationSec: Math.round(run.result.durationMs / 1000),
       timedOut: run.result.timedOut,
