@@ -86,6 +86,22 @@ describe('api e2e', () => {
     expect(scan).toMatchObject({ status: 'queued' })
   })
 
+  it('GET /api/jobs lists the queued scan with its kind, site, and engines', async () => {
+    const res = await fetch('/api/jobs')
+    expect(res.status).toBe(200)
+    const list: unknown = await res.json()
+    expect(list).toMatchObject([
+      {
+        kind: 'scan',
+        status: 'queued',
+        id: scanId,
+        siteId,
+        siteName: 'Local target',
+        engines: ['nuclei'],
+      },
+    ])
+  })
+
   it('GET /api/scans/:id/report.md is rejected before the scan finishes', async () => {
     const res = await fetch(`/api/scans/${scanId}/report.md`)
     expect(res.status).toBe(409)

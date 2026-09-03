@@ -139,6 +139,20 @@ export interface AddTargetsResult {
   added: string[]
   skipped: string[]
 }
+/** One running or queued job, across all sites. Returned by `GET /api/jobs`
+ * in the job loop's claim order (running first, then queued scans oldest-first,
+ * then queued discoveries oldest-first) — display order = execution order. */
+export interface JobView {
+  kind: 'scan' | 'discovery'
+  status: 'running' | 'queued'
+  id: string
+  siteId: string
+  siteName: string
+  createdAt: string
+  startedAt: string | null
+  /** Only for scans. */
+  engines?: Engine[]
+}
 export interface ApiErrorData {
   code?: string
   issues?: string[]

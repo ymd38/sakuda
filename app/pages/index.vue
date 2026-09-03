@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import JobQueuePanel from '~/components/job/JobQueuePanel.vue'
 import ScanStatusBadge from '~/components/scan/ScanStatusBadge.vue'
 import type { SiteListItem } from '#shared/types/api'
 
@@ -8,6 +9,8 @@ const { data: sites } = await useFetch<SiteListItem[]>('/api/sites', { key: 'sit
 <template>
   <div>
     <h1 class="font-display text-heading-xl uppercase">Sites</h1>
+
+    <JobQueuePanel />
 
     <div
       v-if="!sites || sites.length === 0"
