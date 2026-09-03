@@ -27,6 +27,10 @@ export interface ZapFePlanInput {
    * `domain/activeScan`): adds an `activeScan` job after the crawl so ZAP's
    * XSS rules (reflected / DOM) run against what the spiders found. */
   activeScan?: { maxScanMinutes: number }
+  /** Saved targets to GET once the spiders are done (AF `requestor`), so
+   * URLs the crawl never reached still sit in the site tree for the passive
+   * and active scans. Empty or absent → no requestor job. */
+  requestUrls?: string[]
   reportDir: string
 }
 
@@ -88,6 +92,14 @@ const ajaxSpiderJob = (contextName: string, url: string, maxDuration: number) =>
   },
 })
 
+/** GET each URL once. `requests` is a sibling of `parameters` in the AF
+ * requestor job, like `policyDefinition` for activeScan. */
+const requestorJob = (urls: string[]) => ({
+  type: 'requestor',
+  parameters: {},
+  requests: urls.map((url) => ({ url, method: 'GET' })),
+})
+
 /** Default policy, hard-capped by `maxScanDurationInMins`. */
 const activeScanJob = (
   contextName: string,
@@ -132,6 +144,7 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
         parameters: { context: i.context.name, url: i.seedUrl, maxDuration: i.spiderMaxMinutes },
       },
       ajaxSpiderJob(i.context.name, i.seedUrl, i.ajaxMaxMinutes),
+      ...(i.requestUrls?.length ? [requestorJob(i.requestUrls)] : []),
       ...(i.activeScan
         ? [activeScanJob(i.context.name, i.activeScan.maxScanMinutes, FE_ACTIVE_SCAN_PARAMS)]
         : []),

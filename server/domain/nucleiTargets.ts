@@ -16,6 +16,8 @@ export interface NucleiTargetSite {
 export function expandNucleiTargets(site: NucleiTargetSite): {
   urls: string[]
   excluded: string[]
+  /** False when the site has no saved lines and `urls` is the root fallback. */
+  configured: boolean
 } {
   const parsed = parseNucleiPathLines(site.nucleiPaths)
   // No paths configured → scan the base URL(s) themselves. Nuclei is
@@ -41,5 +43,23 @@ export function expandNucleiTargets(site: NucleiTargetSite): {
     if (pathMatchesAny(new URL(url).pathname, patterns)) excluded.push(url)
     else urls.push(url)
   }
-  return { urls, excluded }
+  return { urls, excluded, configured: parsed.lines.length > 0 }
+}
+
+/**
+ * The saved targets ZAP FE requests up front (AF `requestor` job) so URLs
+ * the spider never reaches — a history-mode SPA's `/search?q=` — still land
+ * in the site tree for the passive and active scans. Same expansion and
+ * exclusion as nuclei (one source of truth), narrowed to what the FE plan
+ * can act on: the front origin only (`api:` lines belong to zap-api's
+ * context), and no hash routes — the fragment never reaches the server, so
+ * requesting `/#/search?q=` is just another GET of `/` (their DOM probing is
+ * a separate concern). No saved lines → no requestor job at all: the root
+ * fallback nuclei uses is already the spider's seed.
+ */
+export function zapFeRequestTargets(site: NucleiTargetSite): string[] {
+  const { urls, configured } = expandNucleiTargets(site)
+  if (!configured) return []
+  const frontOrigin = new URL(site.frontBaseUrl).origin
+  return urls.filter((u) => !u.includes('#') && new URL(u).origin === frontOrigin)
 }

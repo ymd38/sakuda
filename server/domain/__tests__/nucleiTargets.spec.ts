@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { expandNucleiTargets, type NucleiTargetSite } from '../nucleiTargets'
+import { expandNucleiTargets, zapFeRequestTargets, type NucleiTargetSite } from '../nucleiTargets'
 
 const site: NucleiTargetSite = {
   frontBaseUrl: 'http://localhost:3000',
@@ -10,10 +10,10 @@ const site: NucleiTargetSite = {
 
 describe('expandNucleiTargets', () => {
   it('defaults to the base URL roots when no paths are configured', () => {
-    expect(expandNucleiTargets({ ...site, nucleiPaths: '' }).urls).toEqual([
-      'http://localhost:3000/',
-      'http://localhost:8080/',
-    ])
+    const defaulted = expandNucleiTargets({ ...site, nucleiPaths: '' })
+    expect(defaulted.urls).toEqual(['http://localhost:3000/', 'http://localhost:8080/'])
+    expect(defaulted.configured).toBe(false)
+    expect(expandNucleiTargets(site).configured).toBe(true)
     expect(
       expandNucleiTargets({ ...site, nucleiPaths: '# only a comment', apiBaseUrl: null }).urls,
     ).toEqual(['http://localhost:3000/'])
@@ -46,5 +46,27 @@ describe('expandNucleiTargets', () => {
   it('skips "api:" lines when apiBaseUrl is not set', () => {
     const { urls } = expandNucleiTargets({ ...site, apiBaseUrl: null, nucleiPaths: 'api:/v1/x' })
     expect(urls).toEqual([])
+  })
+})
+
+describe('zapFeRequestTargets', () => {
+  it('returns [] when no target lines are configured — the root fallback is not a target', () => {
+    expect(zapFeRequestTargets({ ...site, nucleiPaths: '' })).toEqual([])
+    expect(zapFeRequestTargets({ ...site, nucleiPaths: '# only a comment' })).toEqual([])
+  })
+
+  it('keeps front-origin targets only: no api: lines, no hash routes', () => {
+    expect(
+      zapFeRequestTargets({
+        ...site,
+        nucleiPaths: '/\n/search?q=\napi:/v1/users\n/#/search?q=\n/greet?name=a#top',
+      }),
+    ).toEqual(['http://localhost:3000/', 'http://localhost:3000/search?q='])
+  })
+
+  it('applies the exclude paths the same way as nuclei', () => {
+    expect(zapFeRequestTargets({ ...site, excludePaths: '/login' })).toEqual([
+      'http://localhost:3000/',
+    ])
   })
 })

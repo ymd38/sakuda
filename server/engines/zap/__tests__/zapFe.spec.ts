@@ -96,7 +96,11 @@ describe('runZapFe', () => {
   const readPlanJobs = (workDir: string) =>
     (
       YAML.parse(readFileSync(join(workDir, 'plan.yaml'), 'utf8')) as {
-        jobs: Array<{ type: string; parameters: Record<string, unknown> }>
+        jobs: Array<{
+          type: string
+          parameters: Record<string, unknown>
+          requests?: Array<{ url: string; method: string }>
+        }>
       }
     ).jobs
 
@@ -133,6 +137,78 @@ describe('runZapFe', () => {
     expect(jobs[3]?.parameters.maxScanDurationInMins).toBe(30)
     expect(out.meta.activeScan).toBe(true)
     expect(out.meta.activeScanMaxMinutes).toBe(30)
+  })
+
+  it('requests the saved front-origin targets (alias-rewritten, no hash routes) before the active scan', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+      SAKUDA_ZAP_LOCALHOST_ALIAS: 'host.docker.internal',
+    })
+    const workDir = join(tmp, 'work')
+    const site = baseSite({
+      apiBaseUrl: 'http://localhost:8080',
+      nucleiPaths: '/search?q=\n/#/search?q=\napi:/v1/users\n/login',
+      excludePaths: '/login',
+      allowMutatingRequests: true,
+    })
+
+    const out = await runZapFe({
+      scanId: 'scan-6',
+      engine: 'zap-fe',
+      site,
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const jobs = readPlanJobs(workDir)
+    expect(jobs.map((j) => j.type)).toEqual([
+      'passiveScan-config',
+      'spider',
+      'spiderAjax',
+      'requestor',
+      'activeScan',
+      'passiveScan-wait',
+      'report',
+      'report',
+    ])
+    // active run: the empty query value is seeded like nuclei's targets file
+    expect(jobs[3]?.requests).toEqual([
+      { url: 'http://host.docker.internal:3000/search?q=1', method: 'GET' },
+    ])
+    expect(out.meta.targetUrlCount).toBe(1)
+  })
+
+  it('passes the saved targets verbatim (no query seeding) on a passive run, and none when the list is empty', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const run = (workDir: string, nucleiPaths: string) =>
+      runZapFe({
+        scanId: 'scan-7',
+        engine: 'zap-fe',
+        site: baseSite({ nucleiPaths }),
+        workDir,
+        env,
+        logger,
+        signal: new AbortController().signal,
+      })
+
+    const passive = await run(join(tmp, 'passive'), '/search?q=')
+    const requestor = readPlanJobs(join(tmp, 'passive')).find((j) => j.type === 'requestor')
+    expect(requestor?.requests).toEqual([{ url: 'http://localhost:3000/search?q=', method: 'GET' }])
+    expect(passive.meta.targetUrlCount).toBe(1)
+
+    const none = await run(join(tmp, 'none'), '')
+    expect(readPlanJobs(join(tmp, 'none')).some((j) => j.type === 'requestor')).toBe(false)
+    expect(none.meta.targetUrlCount).toBe(0)
   })
 
   it('keeps the active scan off for an unconfirmed non-local site even when opted in', async () => {

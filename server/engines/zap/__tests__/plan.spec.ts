@@ -105,6 +105,54 @@ describe('buildZapFePlan', () => {
     // Off: the plan is exactly the default one, job for job.
     expect(jobsOf(buildZapFePlan(base))).toEqual(on.filter((j) => j.type !== 'activeScan'))
   })
+
+  it('requests the saved targets (GET) after the Ajax spider and before the active scan', () => {
+    const base = {
+      context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
+      seedUrl: 'http://h:3000/',
+      spiderMaxMinutes: 5,
+      ajaxMaxMinutes: 5,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    }
+    // as: plans are Record<string, unknown>; narrow the job list for assertions only
+    const jobsOf = (plan: Record<string, unknown>) =>
+      plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>
+
+    const withTargets = jobsOf(
+      buildZapFePlan({
+        ...base,
+        requestUrls: ['http://h:3000/search?q=1', 'http://h:3000/greet?name=1'],
+        activeScan: { maxScanMinutes: 45 },
+      }),
+    )
+    expect(withTargets.map((j) => j.type)).toEqual([
+      'passiveScan-config',
+      'spider',
+      'spiderAjax',
+      'requestor',
+      'activeScan',
+      'passiveScan-wait',
+      'report',
+      'report',
+    ])
+    // `requests` is a sibling of `parameters` in the AF requestor job.
+    expect(withTargets[3]).toEqual({
+      type: 'requestor',
+      parameters: {},
+      requests: [
+        { url: 'http://h:3000/search?q=1', method: 'GET' },
+        { url: 'http://h:3000/greet?name=1', method: 'GET' },
+      ],
+    })
+
+    // No targets (absent or empty): the plan is the one without the job, job for job.
+    const without = withTargets.filter((j) => j.type !== 'requestor')
+    expect(jobsOf(buildZapFePlan({ ...base, activeScan: { maxScanMinutes: 45 } }))).toEqual(without)
+    expect(
+      jobsOf(buildZapFePlan({ ...base, requestUrls: [], activeScan: { maxScanMinutes: 45 } })),
+    ).toEqual(without)
+  })
 })
 
 describe('buildZapApiPlan', () => {

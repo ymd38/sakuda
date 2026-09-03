@@ -1,7 +1,8 @@
 import { join } from 'node:path'
-import { isActiveScanEnabled } from '../../domain/activeScan'
+import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeScan'
 import { escapeRegex, parseExcludePatterns, toZapExcludeRegex } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
+import { zapFeRequestTargets } from '../../domain/nucleiTargets'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildZapFePlan, planToYaml, ZAP_REPORT_JSON } from './plan'
 import { buildFirefoxPrefsConfig } from './firefoxPrefs'
@@ -28,6 +29,11 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   // site's ZAP API limit: it is the one active-scan budget the site defines.
   const activeScan = isActiveScanEnabled(site)
   const activeScanMaxMinutes = activeScan ? site.zapApiMaxMinutes : 0
+  // Saved targets the spiders may never reach get requested up front so the
+  // scans see them; an active run seeds empty query values (`?q=` → `?q=1`)
+  // exactly as nuclei's transient targets file does — the saved list is untouched.
+  const savedTargets = zapFeRequestTargets(site).map((u) => rewriteLoopbackHost(u, alias))
+  const requestUrls = activeScan ? seedEmptyQueryValues(savedTargets) : savedTargets
   const plan = buildZapFePlan({
     context: {
       name: 'sakuda',
@@ -49,6 +55,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     ajaxMaxMinutes: site.zapFeSpiderMaxMinutes,
     passiveMaxMinutes,
     ...(activeScan ? { activeScan: { maxScanMinutes: activeScanMaxMinutes } } : {}),
+    requestUrls,
     reportDir: zapPath(env, workDir, '') + '/',
   })
   logger.info(
@@ -59,6 +66,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       activeScan,
       activeScanMaxMinutes,
+      targetUrlCount: requestUrls.length,
       headerNames: site.headerNames,
       browserStorageNames: site.browserStorageNames,
     },
@@ -128,6 +136,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       activeScan,
       ...(activeScan ? { activeScanMaxMinutes } : {}),
+      targetUrlCount: requestUrls.length,
       reachedUrlCount: n.reachedUrls.length,
       reachedUrls: n.reachedUrls.slice(0, 200),
       authFailureCount: n.authFailureCount,
