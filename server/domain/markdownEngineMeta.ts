@@ -88,6 +88,11 @@ function zapRows(meta: Record<string, unknown>, isFrontend: boolean): string[] {
       const cap = activeScanMaxMinutes !== undefined ? ` (max ${activeScanMaxMinutes} min)` : ''
       rows.push(`| Active scan | Yes${cap} |`)
     }
+    const hashRouteCount = metaNumber(meta, 'hashRouteCount')
+    if (hashRouteCount !== undefined && hashRouteCount > 0) {
+      const truncated = metaBoolean(meta, 'domXssTruncated') ? ' (budget reached)' : ''
+      rows.push(`| DOM XSS probe (hash routes) | ${hashRouteCount}${truncated} |`)
+    }
   } else {
     const targetUrl = metaString(meta, 'targetUrl')
     if (targetUrl) rows.push(`| Target URL | ${code(targetUrl)} |`)

@@ -153,6 +153,57 @@ describe('buildZapFePlan', () => {
       jobsOf(buildZapFePlan({ ...base, requestUrls: [], activeScan: { maxScanMinutes: 45 } })),
     ).toEqual(without)
   })
+
+  it('adds the DOM XSS probe script (add + run) after the active scan when domXssProbe is set', () => {
+    const base = {
+      context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
+      seedUrl: 'http://h:3000/',
+      spiderMaxMinutes: 5,
+      ajaxMaxMinutes: 5,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    }
+    const jobsOf = (plan: Record<string, unknown>) =>
+      plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>
+
+    const probe = {
+      file: '/zap/wrk/dom-xss-probe.js',
+      name: 'sakuda-dom-xss-probe',
+      engine: 'ECMAScript : Graal.js',
+    }
+    const withProbe = jobsOf(
+      buildZapFePlan({ ...base, activeScan: { maxScanMinutes: 45 }, domXssProbe: probe }),
+    )
+    expect(withProbe.map((j) => j.type)).toEqual([
+      'passiveScan-config',
+      'spider',
+      'spiderAjax',
+      'activeScan',
+      'script',
+      'script',
+      'passiveScan-wait',
+      'report',
+      'report',
+    ])
+    expect(withProbe[4]).toEqual({
+      type: 'script',
+      parameters: {
+        action: 'add',
+        type: 'standalone',
+        engine: 'ECMAScript : Graal.js',
+        name: 'sakuda-dom-xss-probe',
+        file: '/zap/wrk/dom-xss-probe.js',
+      },
+    })
+    expect(withProbe[5]).toEqual({
+      type: 'script',
+      parameters: { action: 'run', type: 'standalone', name: 'sakuda-dom-xss-probe' },
+    })
+
+    // Absent: the plan is the one without the two script jobs, job for job.
+    const without = withProbe.filter((j) => j.type !== 'script')
+    expect(jobsOf(buildZapFePlan({ ...base, activeScan: { maxScanMinutes: 45 } }))).toEqual(without)
+  })
 })
 
 describe('buildZapApiPlan', () => {

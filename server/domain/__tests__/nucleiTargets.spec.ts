@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { expandNucleiTargets, zapFeRequestTargets, type NucleiTargetSite } from '../nucleiTargets'
+import {
+  expandNucleiTargets,
+  zapFeHashRouteTargets,
+  zapFeRequestTargets,
+  type NucleiTargetSite,
+} from '../nucleiTargets'
 
 const site: NucleiTargetSite = {
   frontBaseUrl: 'http://localhost:3000',
@@ -68,5 +73,37 @@ describe('zapFeRequestTargets', () => {
     expect(zapFeRequestTargets({ ...site, excludePaths: '/login' })).toEqual([
       'http://localhost:3000/',
     ])
+  })
+})
+
+describe('zapFeHashRouteTargets', () => {
+  it('returns [] when no target lines are configured', () => {
+    expect(zapFeHashRouteTargets({ ...site, nucleiPaths: '' })).toEqual([])
+    expect(zapFeHashRouteTargets({ ...site, nucleiPaths: '# only a comment' })).toEqual([])
+  })
+
+  it('keeps only front-origin targets that contain "#" — the complement of zapFeRequestTargets', () => {
+    const s = {
+      ...site,
+      nucleiPaths: '/\n/search?q=\napi:/v1/users\n/#/search?q=\n/#/track?id=',
+    }
+    expect(zapFeHashRouteTargets(s)).toEqual([
+      'http://localhost:3000/#/search?q=',
+      'http://localhost:3000/#/track?id=',
+    ])
+    // request targets and hash-route targets partition the front-origin lines
+    expect(zapFeRequestTargets(s)).toEqual([
+      'http://localhost:3000/',
+      'http://localhost:3000/search?q=',
+    ])
+  })
+
+  it('drops api: hash lines (they resolve to the API origin, not the front)', () => {
+    expect(
+      zapFeHashRouteTargets({
+        ...site,
+        nucleiPaths: 'api:/#/x\n/#/keep?q=',
+      }),
+    ).toEqual(['http://localhost:3000/#/keep?q='])
   })
 })

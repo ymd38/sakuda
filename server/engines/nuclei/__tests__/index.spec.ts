@@ -267,6 +267,13 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     void off
   })
 
+  it('drops hash-route lines from the targets file (fragments never reach the server)', async () => {
+    await run(baseSite({ nucleiPaths: '/plain\n/#/search?q=\n/#/track?id=' }))
+    const targets = readFileSync(join(tmp, 'work', 'targets.txt'), 'utf8')
+    expect(targets).toBe('http://localhost:3001/plain\n')
+    expect(targets).not.toContain('#')
+  })
+
   it('passes -dast and the DAST template dir when the site is opted in', async () => {
     const { out, argv } = await run(
       baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=\n/plain' }),

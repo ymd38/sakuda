@@ -166,12 +166,15 @@ describe('runZapFe', () => {
     })
 
     const jobs = readPlanJobs(workDir)
+    // the `/#/search?q=` hash route also drives the DOM XSS probe (script add + run)
     expect(jobs.map((j) => j.type)).toEqual([
       'passiveScan-config',
       'spider',
       'spiderAjax',
       'requestor',
       'activeScan',
+      'script',
+      'script',
       'passiveScan-wait',
       'report',
       'report',
@@ -209,6 +212,49 @@ describe('runZapFe', () => {
     const none = await run(join(tmp, 'none'), '')
     expect(readPlanJobs(join(tmp, 'none')).some((j) => j.type === 'requestor')).toBe(false)
     expect(none.meta.targetUrlCount).toBe(0)
+  })
+
+  it('runs the DOM XSS probe on hash routes only when opted in, and records hashRouteCount', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+      SAKUDA_ZAP_LOCALHOST_ALIAS: 'host.docker.internal',
+    })
+    const run = (workDir: string, allow: boolean) =>
+      runZapFe({
+        scanId: 'scan-dom',
+        engine: 'zap-fe',
+        site: baseSite({
+          nucleiPaths: '/#/search?q=\n/#/track?id=\n/plain',
+          allowMutatingRequests: allow,
+        }),
+        workDir,
+        env,
+        logger,
+        signal: new AbortController().signal,
+      })
+
+    // opted in: two script jobs after the active scan, the probe script written
+    const on = await run(join(tmp, 'on'), true)
+    const onJobs = readPlanJobs(join(tmp, 'on'))
+    const scriptJobs = onJobs.filter((j) => j.type === 'script')
+    expect(scriptJobs.map((j) => j.parameters.action)).toEqual(['add', 'run'])
+    const addJob = scriptJobs[0]!
+    expect(addJob.parameters.type).toBe('standalone')
+    expect(String(addJob.parameters.file)).toContain('dom-xss-probe.js')
+    // the script embeds the alias-rewritten hash routes, not the plain path
+    const scriptText = readFileSync(join(tmp, 'on', 'dom-xss-probe.js'), 'utf8')
+    expect(scriptText).toContain('http://host.docker.internal:3000/#/search?q=')
+    expect(scriptText).toContain('http://host.docker.internal:3000/#/track?id=')
+    expect(scriptText).not.toContain('/plain')
+    expect(on.meta.hashRouteCount).toBe(2)
+
+    // opted out: no probe job at all
+    const off = await run(join(tmp, 'off'), false)
+    expect(readPlanJobs(join(tmp, 'off')).some((j) => j.type === 'script')).toBe(false)
+    expect(off.meta.hashRouteCount).toBe(0)
   })
 
   it('keeps the active scan off for an unconfirmed non-local site even when opted in', async () => {

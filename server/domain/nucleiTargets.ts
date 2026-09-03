@@ -63,3 +63,18 @@ export function zapFeRequestTargets(site: NucleiTargetSite): string[] {
   const frontOrigin = new URL(site.frontBaseUrl).origin
   return urls.filter((u) => !u.includes('#') && new URL(u).origin === frontOrigin)
 }
+
+/**
+ * The saved front-origin targets that ARE hash routes (`/#/search?q=`) — the
+ * exact complement of {@link zapFeRequestTargets} within the front origin.
+ * The fragment never reaches the server, so ZAP's spider/requestor/activeScan
+ * cannot test these; the headless DOM XSS probe (see `domXssProbeScript`)
+ * opens each in a real browser instead. `api:` lines resolve to the API
+ * origin and are dropped. No saved lines → none.
+ */
+export function zapFeHashRouteTargets(site: NucleiTargetSite): string[] {
+  const { urls, configured } = expandNucleiTargets(site)
+  if (!configured) return []
+  const frontOrigin = new URL(site.frontBaseUrl).origin
+  return urls.filter((u) => u.includes('#') && new URL(u).origin === frontOrigin)
+}

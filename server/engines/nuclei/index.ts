@@ -17,7 +17,12 @@ import { buildNucleiArgs, nucleiTagsFor } from './args'
 import { normalizeNucleiLines, parseNucleiJsonl, parseNucleiStats } from './normalize'
 
 export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
-  const { urls, excluded } = expandNucleiTargets(site)
+  const { urls: allUrls, excluded } = expandNucleiTargets(site)
+  // Hash routes (`/#/search?q=`) are SPA client routes: the fragment never
+  // reaches the server, so requesting one just GETs `/`. nuclei is
+  // server-side, so it cannot test them — they are handled by the zap-fe DOM
+  // XSS probe instead (see domXssProbeScript). Drop them here.
+  const urls = allUrls.filter((u) => !u.includes('#'))
   if (urls.length === 0)
     throw new EngineError('nuclei: no target URLs (nucleiPaths is empty or every path is excluded)')
   const originalHost = new URL(site.frontBaseUrl).hostname

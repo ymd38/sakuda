@@ -31,7 +31,19 @@ export interface ZapFePlanInput {
    * URLs the crawl never reached still sit in the site tree for the passive
    * and active scans. Empty or absent → no requestor job. */
   requestUrls?: string[]
+  /** Standalone DOM XSS probe script (see `domXssProbeScript`) for SPA hash
+   * routes, run after the active scan. Absent → no probe jobs. */
+  domXssProbe?: ZapStandaloneScript
   reportDir: string
+}
+
+/** A ZAP "standalone" script registered and run by a `script` add/run job
+ * pair (see `standaloneScriptJobs`). */
+export interface ZapStandaloneScript {
+  /** Container-side path (see `zapPath`). */
+  file: string
+  name: string
+  engine: string
 }
 
 export interface ZapApiPlanInput {
@@ -92,6 +104,21 @@ const ajaxSpiderJob = (contextName: string, url: string, maxDuration: number) =>
   },
 })
 
+/** `script` add + run job pair for a standalone script. */
+const standaloneScriptJobs = (s: ZapStandaloneScript) => [
+  {
+    type: 'script',
+    parameters: {
+      action: 'add',
+      type: 'standalone',
+      engine: s.engine,
+      name: s.name,
+      file: s.file,
+    },
+  },
+  { type: 'script', parameters: { action: 'run', type: 'standalone', name: s.name } },
+]
+
 /** GET each URL once. `requests` is a sibling of `parameters` in the AF
  * requestor job, like `policyDefinition` for activeScan. */
 const requestorJob = (urls: string[]) => ({
@@ -148,6 +175,7 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
       ...(i.activeScan
         ? [activeScanJob(i.context.name, i.activeScan.maxScanMinutes, FE_ACTIVE_SCAN_PARAMS)]
         : []),
+      ...(i.domXssProbe ? standaloneScriptJobs(i.domXssProbe) : []),
       { type: 'passiveScan-wait', parameters: { maxDuration: i.passiveMaxMinutes } },
       ...reportJobs(i.reportDir),
     ],
