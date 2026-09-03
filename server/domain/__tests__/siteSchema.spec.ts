@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SiteInputSchema } from '#shared/schemas/site'
+import { SiteInputSchema, SiteUpdateSchema } from '#shared/schemas/site'
 
 const minimal = { name: 'Site', frontBaseUrl: 'http://localhost:3000' }
 
@@ -123,6 +123,37 @@ describe('SiteInputSchema', () => {
       headers: [{ name: 'Cookie', value: 'a=b' }],
     })
     expect(result.success).toBe(true)
+  })
+
+  it('rejects duplicate header names (exact, case-sensitive match)', () => {
+    const dup = [
+      { name: 'Cookie', value: 'a' },
+      { name: 'Cookie', value: 'b' },
+    ]
+    expect(issuesFor({ ...minimal, headers: dup }).some((i) => i.path[0] === 'headers')).toBe(true)
+    expect(SiteUpdateSchema.safeParse({ ...minimal, headers: dup }).success).toBe(false)
+    // different case = different header as far as the merge is concerned
+    const ok = SiteUpdateSchema.safeParse({
+      ...minimal,
+      headers: [{ name: 'cookie' }, { name: 'Cookie', value: 'b' }],
+    })
+    expect(ok.success).toBe(true)
+  })
+
+  it('SiteUpdateSchema lets a header row omit its value; SiteInputSchema still requires it', () => {
+    const rows = [{ name: 'Authorization' }, { name: 'X-Api-Key', value: 'k' }]
+    const update = SiteUpdateSchema.safeParse({ ...minimal, headers: rows })
+    expect(update.success).toBe(true)
+    expect(update.data?.headers).toEqual(rows)
+    const create = SiteInputSchema.safeParse({ ...minimal, headers: rows })
+    expect(create.success).toBe(false)
+    expect(create.error?.issues.some((i) => i.path.join('.') === 'headers.0.value')).toBe(true)
+  })
+
+  it('SiteUpdateSchema applies the same cross-field rules as SiteInputSchema', () => {
+    const r = SiteUpdateSchema.safeParse({ ...minimal, nucleiPaths: 'api:/x' })
+    expect(r.success).toBe(false)
+    expect(r.error?.issues.some((i) => i.path.join('.') === 'apiBaseUrl')).toBe(true)
   })
 
   it('requires zapFeSeedPath to start with "/"', () => {

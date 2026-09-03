@@ -2,8 +2,8 @@
 import { computed, reactive, ref } from 'vue'
 import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
 import { BROWSER_STORAGE_KINDS } from '#shared/schemas/browserStorage'
-import type { Header } from '#shared/schemas/headers'
-import type { SiteInput } from '#shared/schemas/site'
+import type { HeaderPatch } from '#shared/schemas/headers'
+import type { SiteUpdateInput } from '#shared/schemas/site'
 import type { RiskTag, SitePublic } from '#shared/types/api'
 
 const props = defineProps<{
@@ -14,7 +14,9 @@ const props = defineProps<{
   cancelTo?: string
 }>()
 
-const emit = defineEmits<{ submit: [payload: SiteInput] }>()
+/** In create mode every header row carries its value, so the payload is
+ * also a valid `SiteInput` for `POST`. */
+const emit = defineEmits<{ submit: [payload: SiteUpdateInput] }>()
 
 const isEditMode = computed(() => !!props.initial)
 
@@ -83,10 +85,14 @@ const requiresConfirmation = computed(() => {
 })
 
 // Headers are write-only: the API never returns values, only `headerNames`.
-// In edit mode the editor starts hidden — submitting without touching it
-// omits `headers` from the payload so the API keeps the existing set.
-const headersEditable = ref(!isEditMode.value)
-const headerRows = reactive<{ name: string; value: string }[]>([])
+// In edit mode every stored name starts as a row with an empty value; a row
+// left empty is sent as name-only, which `PUT` treats as "keep the stored
+// value" (the merge lives in siteService.updateSite, not here).
+type HeaderRow = { name: string; value: string }
+const storedHeaderNames = new Set(props.initial?.headerNames ?? [])
+const headerRows = reactive<HeaderRow[]>(
+  [...storedHeaderNames].map((name) => ({ name, value: '' })),
+)
 
 function addHeaderRow() {
   headerRows.push({ name: '', value: '' })
@@ -96,24 +102,22 @@ function removeHeaderRow(index: number) {
   headerRows.splice(index, 1)
 }
 
-function startReplacingHeaders() {
-  headersEditable.value = true
+function isStoredHeader(row: HeaderRow): boolean {
+  return storedHeaderNames.has(row.name)
 }
 
 function emptyToNull(value: string): string | null {
   return value.trim() === '' ? null : value
 }
 
-// A header row is only sendable once both fields are filled — a row with
-// just a name (or just a value) is dropped rather than submitted, since
-// `HeaderSchema` requires both and the server-side error would be confusing
-// for a row the user hasn't finished typing yet.
-function isCompleteHeader(row: { name: string; value: string }): boolean {
-  return row.name.trim() !== '' && row.value.trim() !== ''
-}
-
-function toHeader(row: { name: string; value: string }): Header {
-  return { name: row.name, value: row.value }
+// A row with a value is sent as-is; an empty value is only meaningful for a
+// stored name (keep it). Any other half-filled row is dropped rather than
+// submitted, since the server-side error would be confusing for a row the
+// user hasn't finished typing yet.
+function toHeaderPatch(row: HeaderRow): HeaderPatch | null {
+  if (row.name.trim() === '') return null
+  if (row.value.trim() !== '') return { name: row.name, value: row.value }
+  return isStoredHeader(row) ? { name: row.name } : null
 }
 
 // Browser storage follows the same write-only contract as headers: the API
@@ -155,7 +159,7 @@ function toFiniteNumber(value: number | string, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-function buildPayload(): SiteInput {
+function buildPayload(): SiteUpdateInput {
   const base = {
     name: form.name,
     frontBaseUrl: form.frontBaseUrl,
@@ -175,9 +179,7 @@ function buildPayload(): SiteInput {
   }
   return {
     ...base,
-    ...(headersEditable.value
-      ? { headers: headerRows.filter(isCompleteHeader).map(toHeader) }
-      : {}),
+    headers: headerRows.map(toHeaderPatch).filter((h) => h !== null),
     ...(storageEditable.value
       ? { browserStorage: storageRows.filter(isCompleteStorage).map(toStorageItem) }
       : {}),
@@ -615,31 +617,12 @@ function handleSubmit() {
           Stored encrypted, never shown again.
         </p>
 
-        <div v-if="isEditMode && !headersEditable" class="flex flex-col gap-3">
-          <ul class="flex flex-wrap gap-2">
-            <li
-              v-for="headerName in props.initial?.headerNames ?? []"
-              :key="headerName"
-              data-testid="header-chip"
-              class="badge"
-            >
-              {{ headerName }}
-            </li>
-            <li v-if="!props.initial?.headerNames.length" class="text-caption-sm text-mute">
-              No headers configured.
-            </li>
-          </ul>
-          <button
-            type="button"
-            data-testid="replace-headers"
-            class="btn-secondary self-start"
-            @click="startReplacingHeaders"
-          >
-            Replace headers
-          </button>
-        </div>
+        <p v-if="isEditMode" class="text-caption-sm text-mute">
+          Leave a value empty to keep the stored one; type a new value to replace it. Remove a row
+          to delete that header.
+        </p>
 
-        <div v-else data-testid="headers-editor" class="flex flex-col gap-3">
+        <div data-testid="headers-editor" class="flex flex-col gap-3">
           <div
             v-for="(row, index) in headerRows"
             :key="index"
@@ -657,7 +640,7 @@ function handleSubmit() {
               :data-testid="`header-value-${index}`"
               type="password"
               autocomplete="off"
-              placeholder="Header value"
+              :placeholder="isStoredHeader(row) ? 'unchanged' : 'Header value'"
               class="input-pill"
             />
             <button

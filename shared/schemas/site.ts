@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { RISK_TAGS } from '../types/api'
 import { BrowserStorageSchema } from './browserStorage'
-import { HeadersSchema } from './headers'
+import { HeaderPatchesSchema, HeadersSchema } from './headers'
 import { siteRequiresConfirmation } from '../utils/localHost'
 import { parseNucleiPathLines } from '../utils/nucleiPaths'
 import { parseSeedPathLines } from '../utils/seedPaths'
@@ -17,80 +17,94 @@ const HttpUrl = z
   .transform((u) => u.replace(/\/+$/, ''))
 const OptionalHttpUrl = z.preprocess(emptyToNull, HttpUrl.nullable()).default(null)
 
-export const SiteInputSchema = z
-  .object({
-    name: z.string().trim().min(1).max(100),
-    frontBaseUrl: HttpUrl,
-    apiBaseUrl: OptionalHttpUrl,
-    nucleiPaths: z.string().max(NUCLEI_PATHS_MAX_CHARS).default(''),
-    openapiUrl: OptionalHttpUrl,
-    openapiJson: z.preprocess(emptyToNull, z.string().max(5_000_000).nullable()).default(null),
-    zapFeSeedPath: z
-      .string()
-      .regex(/^\/\S*$/, 'must start with "/"')
-      .default('/'),
-    /** Discovery crawl seeds, one path per line; empty → `zapFeSeedPath`. */
-    discoverySeedPaths: z.string().max(5_000).default(''),
-    excludePaths: z.string().max(5_000).default(''),
-    nucleiRateLimit: z.number().int().min(1).max(1000).default(50),
-    zapApiMaxMinutes: z.number().int().min(1).max(600).default(45),
-    zapFeSpiderMaxMinutes: z.number().int().min(1).max(120).default(5),
-    nonLocalConfirmed: z.boolean().default(false),
-    /** Site-level opt-in for active injection checks (nuclei DAST). Off by
-     * default: a scan then sends passive + signature requests only. See
-     * `server/domain/activeScan.ts` for the effective decision. */
-    allowMutatingRequests: z.boolean().default(false),
-    /** nuclei risk-template groups to un-exclude, effective only under
-     * allowMutatingRequests (see server/domain/activeScan). */
-    nucleiEnabledRiskTags: z.array(z.enum(RISK_TAGS)).default([]),
-    headers: HeadersSchema.optional(),
-    /** Injected into ZAP's browser before the Ajax spider runs (SPA login state). */
-    browserStorage: BrowserStorageSchema.optional(),
-  })
-  .superRefine((v, ctx) => {
-    const parsed = parseNucleiPathLines(v.nucleiPaths)
-    for (const e of parsed.errors)
-      ctx.addIssue({ code: 'custom', path: ['nucleiPaths'], message: e })
-    for (const e of parseSeedPathLines(v.discoverySeedPaths).errors)
-      ctx.addIssue({ code: 'custom', path: ['discoverySeedPaths'], message: e })
-    if (!v.apiBaseUrl && parsed.lines.some((l) => l.base === 'api')) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['apiBaseUrl'],
-        message: 'apiBaseUrl is required because nucleiPaths contains "api:" lines',
-      })
-    }
-    if (v.openapiUrl && v.openapiJson) {
+const SiteFieldsSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  frontBaseUrl: HttpUrl,
+  apiBaseUrl: OptionalHttpUrl,
+  nucleiPaths: z.string().max(NUCLEI_PATHS_MAX_CHARS).default(''),
+  openapiUrl: OptionalHttpUrl,
+  openapiJson: z.preprocess(emptyToNull, z.string().max(5_000_000).nullable()).default(null),
+  zapFeSeedPath: z
+    .string()
+    .regex(/^\/\S*$/, 'must start with "/"')
+    .default('/'),
+  /** Discovery crawl seeds, one path per line; empty → `zapFeSeedPath`. */
+  discoverySeedPaths: z.string().max(5_000).default(''),
+  excludePaths: z.string().max(5_000).default(''),
+  nucleiRateLimit: z.number().int().min(1).max(1000).default(50),
+  zapApiMaxMinutes: z.number().int().min(1).max(600).default(45),
+  zapFeSpiderMaxMinutes: z.number().int().min(1).max(120).default(5),
+  nonLocalConfirmed: z.boolean().default(false),
+  /** Site-level opt-in for active injection checks (nuclei DAST). Off by
+   * default: a scan then sends passive + signature requests only. See
+   * `server/domain/activeScan.ts` for the effective decision. */
+  allowMutatingRequests: z.boolean().default(false),
+  /** nuclei risk-template groups to un-exclude, effective only under
+   * allowMutatingRequests (see server/domain/activeScan). */
+  nucleiEnabledRiskTags: z.array(z.enum(RISK_TAGS)).default([]),
+  headers: HeadersSchema.optional(),
+  /** Injected into ZAP's browser before the Ajax spider runs (SPA login state). */
+  browserStorage: BrowserStorageSchema.optional(),
+})
+
+type SiteFields = z.infer<typeof SiteFieldsSchema>
+
+/** Cross-field rules shared by create and update — they read no header
+ * values, so the two header shapes can share them verbatim. */
+function refineSiteFields(v: Omit<SiteFields, 'headers'>, ctx: z.RefinementCtx) {
+  const parsed = parseNucleiPathLines(v.nucleiPaths)
+  for (const e of parsed.errors) ctx.addIssue({ code: 'custom', path: ['nucleiPaths'], message: e })
+  for (const e of parseSeedPathLines(v.discoverySeedPaths).errors)
+    ctx.addIssue({ code: 'custom', path: ['discoverySeedPaths'], message: e })
+  if (!v.apiBaseUrl && parsed.lines.some((l) => l.base === 'api')) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['apiBaseUrl'],
+      message: 'apiBaseUrl is required because nucleiPaths contains "api:" lines',
+    })
+  }
+  if (v.openapiUrl && v.openapiJson) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['openapiJson'],
+      message: 'set either openapiUrl or openapiJson, not both',
+    })
+  }
+  if (v.openapiJson) {
+    // boundary validation: a parse failure becomes a validation issue, not an exception
+    try {
+      const j: unknown = JSON.parse(v.openapiJson)
+      if (typeof j !== 'object' || j === null) throw new Error('not an object')
+    } catch {
       ctx.addIssue({
         code: 'custom',
         path: ['openapiJson'],
-        message: 'set either openapiUrl or openapiJson, not both',
+        message: 'openapiJson must be a JSON object',
       })
     }
-    if (v.openapiJson) {
-      // boundary validation: a parse failure becomes a validation issue, not an exception
-      try {
-        const j: unknown = JSON.parse(v.openapiJson)
-        if (typeof j !== 'object' || j === null) throw new Error('not an object')
-      } catch {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['openapiJson'],
-          message: 'openapiJson must be a JSON object',
-        })
-      }
-    }
-    if (
-      siteRequiresConfirmation(v.frontBaseUrl, v.apiBaseUrl, v.openapiUrl) &&
-      !v.nonLocalConfirmed
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['nonLocalConfirmed'],
-        message:
-          'target host is not local: confirm you are authorized to scan it (nonLocalConfirmed)',
-      })
-    }
-  })
+  }
+  if (
+    siteRequiresConfirmation(v.frontBaseUrl, v.apiBaseUrl, v.openapiUrl) &&
+    !v.nonLocalConfirmed
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['nonLocalConfirmed'],
+      message:
+        'target host is not local: confirm you are authorized to scan it (nonLocalConfirmed)',
+    })
+  }
+}
+
+/** `POST /api/sites`: every header row carries its value. */
+export const SiteInputSchema = SiteFieldsSchema.superRefine(refineSiteFields)
+
+/** `PUT /api/sites/:id`: a header row may omit `value` to keep the stored
+ * one (see `siteService.updateSite`). A `SiteInput` is also a valid update,
+ * so clients that always send values keep working. */
+export const SiteUpdateSchema = SiteFieldsSchema.extend({
+  headers: HeaderPatchesSchema.optional(),
+}).superRefine(refineSiteFields)
 
 export type SiteInput = z.infer<typeof SiteInputSchema>
+export type SiteUpdateInput = z.infer<typeof SiteUpdateSchema>

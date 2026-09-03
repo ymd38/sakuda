@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import SiteForm from '~/components/site/SiteForm.vue'
 import { buttonElement, inputElement } from '../helpers/dom'
-import { SiteInputSchema, type SiteInput } from '#shared/schemas/site'
+import {
+  SiteInputSchema,
+  SiteUpdateSchema,
+  type SiteInput,
+  type SiteUpdateInput,
+} from '#shared/schemas/site'
 import type { SitePublic } from '#shared/types/api'
 
 const editSite: SitePublic = {
@@ -41,6 +46,14 @@ function emittedSubmit(wrapper: EmitsSubmit): SiteInput {
   const first = events?.[0]?.[0]
   if (first === undefined) throw new Error('submit was not emitted')
   return SiteInputSchema.parse(first)
+}
+
+/** Edit-mode payloads go to `PUT`, whose schema lets header rows omit `value`. */
+function emittedUpdate(wrapper: EmitsSubmit): SiteUpdateInput {
+  const events = wrapper.emitted('submit')
+  const first = events?.[0]?.[0]
+  if (first === undefined) throw new Error('submit was not emitted')
+  return SiteUpdateSchema.parse(first)
 }
 
 describe('SiteForm', () => {
@@ -177,21 +190,73 @@ describe('SiteForm', () => {
     expect(payload.headers).toEqual([])
   })
 
-  it('lists existing header names in edit mode and hides the editor until Replace headers is clicked', async () => {
-    const wrapper = await mountSuspended(SiteForm, {
-      props: { initial: editSite, submitting: false, errorMessage: null },
+  describe('edit mode header rows', () => {
+    async function mountEdit() {
+      return mountSuspended(SiteForm, {
+        props: { initial: editSite, submitting: false, errorMessage: null },
+      })
+    }
+
+    it('shows every stored name as a row with an empty "unchanged" value and no Replace button', async () => {
+      const wrapper = await mountEdit()
+      expect(wrapper.find('[data-testid="headers-editor"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="replace-headers"]').exists()).toBe(false)
+      expect(inputElement(wrapper, '[data-testid="header-name-0"]').value).toBe('Authorization')
+      expect(inputElement(wrapper, '[data-testid="header-name-1"]').value).toBe('X-Api-Key')
+      for (const i of [0, 1]) {
+        const value = wrapper.find(`[data-testid="header-value-${i}"]`)
+        expect(value.attributes('type')).toBe('password')
+        expect(value.attributes('placeholder')).toBe('unchanged')
+        expect(inputElement(wrapper, `[data-testid="header-value-${i}"]`).value).toBe('')
+      }
     })
 
-    expect(wrapper.text()).toContain('Authorization')
-    expect(wrapper.text()).toContain('X-Api-Key')
-    expect(wrapper.find('[data-testid="headers-editor"]').exists()).toBe(false)
+    it('sends untouched rows as name-only and a row with a typed value as name + value', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="header-value-1"]').setValue('new-key')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).headers).toEqual([
+        { name: 'Authorization' },
+        { name: 'X-Api-Key', value: 'new-key' },
+      ])
+    })
 
-    await wrapper.find('[data-testid="replace-headers"]').trigger('click')
-    expect(wrapper.find('[data-testid="headers-editor"]').exists()).toBe(true)
+    it('removing a row drops it and adding a row appends name + value', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="remove-header-0"]').trigger('click')
+      await wrapper.find('[data-testid="add-header"]').trigger('click')
+      await wrapper.find('[data-testid="header-name-1"]').setValue('Cookie')
+      await wrapper.find('[data-testid="header-value-1"]').setValue('token=1')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).headers).toEqual([
+        { name: 'X-Api-Key' },
+        { name: 'Cookie', value: 'token=1' },
+      ])
+    })
 
-    await wrapper.find('[data-testid="site-form"]').trigger('submit')
-    const payload = emittedSubmit(wrapper)
-    expect(payload.headers).toEqual([])
+    it('drops a new row that has a name but no value (only stored names may omit it)', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="add-header"]').trigger('click')
+      await wrapper.find('[data-testid="header-name-2"]').setValue('X-New')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).headers).toEqual([
+        { name: 'Authorization' },
+        { name: 'X-Api-Key' },
+      ])
+    })
+
+    it('with no stored headers the editor starts empty and submits []', async () => {
+      const wrapper = await mountSuspended(SiteForm, {
+        props: {
+          initial: { ...editSite, headerNames: [] },
+          submitting: false,
+          errorMessage: null,
+        },
+      })
+      expect(wrapper.find('[data-testid="header-name-0"]').exists()).toBe(false)
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).headers).toEqual([])
+    })
   })
 
   it('renders the errorMessage prop in a text-sale block', async () => {
@@ -251,7 +316,7 @@ describe('SiteForm', () => {
     ])
     expect(wrapper.find('[data-testid="storage-editor"]').exists()).toBe(false)
     await wrapper.find('[data-testid="site-form"]').trigger('submit')
-    expect(emittedSubmit(wrapper).browserStorage).toBeUndefined()
+    expect(emittedUpdate(wrapper).browserStorage).toBeUndefined()
 
     await wrapper.find('[data-testid="replace-storage"]').trigger('click')
     expect(wrapper.find('[data-testid="storage-editor"]').exists()).toBe(true)
@@ -318,10 +383,10 @@ describe('SiteForm', () => {
   })
 })
 
-/** Second emitted submit (the first is consumed by `emittedSubmit`). */
-function emittedSubmit2(wrapper: EmitsSubmit): SiteInput {
+/** Second emitted submit (the first is consumed by `emittedUpdate`). */
+function emittedSubmit2(wrapper: EmitsSubmit): SiteUpdateInput {
   const events = wrapper.emitted('submit')
   const second = events?.[1]?.[0]
   if (second === undefined) throw new Error('second submit was not emitted')
-  return SiteInputSchema.parse(second)
+  return SiteUpdateSchema.parse(second)
 }

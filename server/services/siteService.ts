@@ -10,8 +10,8 @@ import type { Logger } from '../lib/logger'
 import { ServiceError } from './errors'
 import { latestScanSummary } from './scanService'
 import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
-import type { Header } from '#shared/schemas/headers'
-import { NUCLEI_PATHS_MAX_CHARS, type SiteInput } from '#shared/schemas/site'
+import type { Header, HeaderPatch } from '#shared/schemas/headers'
+import { NUCLEI_PATHS_MAX_CHARS, type SiteInput, type SiteUpdateInput } from '#shared/schemas/site'
 import type { AddTargetsResult, SiteListItem, SitePublic } from '#shared/types/api'
 
 export { toSitePublic, toSiteSnapshot } from '../domain/siteView'
@@ -75,12 +75,49 @@ export function createSite(deps: SiteServiceDeps, input: SiteInput): SitePublic 
   return getSiteOrThrow(deps.db, id)
 }
 
-export function updateSite(deps: SiteServiceDeps, id: string, input: SiteInput): SitePublic {
+/**
+ * Resolves the header rows of an update against the stored set: a row with
+ * a value is the new value, a row without one keeps the stored value for
+ * that name (exact, case-sensitive match), and stored names absent from the
+ * list are dropped. The header cipher is the only place values ever exist
+ * in the clear, so this is the one place the merge can happen — the UI
+ * never sees stored values and cannot merge on its own.
+ */
+function mergeHeaderPatches(stored: Header[], patches: HeaderPatch[]): Header[] {
+  const storedByName = new Map(stored.map((h) => [h.name, h.value]))
+  const unknown: string[] = []
+  const merged: Header[] = []
+  for (const patch of patches) {
+    const value = patch.value ?? storedByName.get(patch.name)
+    if (value === undefined) unknown.push(patch.name)
+    else merged.push({ name: patch.name, value })
+  }
+  if (unknown.length > 0)
+    throw new ServiceError(
+      422,
+      'VALIDATION',
+      `header value is required for ${unknown.map((n) => `"${n}"`).join(', ')} — no stored value exists for that name (names match exactly, case-sensitive)`,
+      { headers: unknown },
+    )
+  return merged
+}
+
+export function updateSite(deps: SiteServiceDeps, id: string, input: SiteUpdateInput): SitePublic {
   const existing = deps.db.select().from(sites).where(eq(sites.id, id)).get()
   if (!existing) throw new ServiceError(404, 'SITE_NOT_FOUND', `site ${id} not found`)
   // Secrets are write-only: omitting the field keeps the stored set, [] clears it.
   const { headers, browserStorage, ...fields } = input
-  const sealed = headers === undefined ? {} : sealHeaders(deps, id, headers)
+  const sealed =
+    headers === undefined
+      ? {}
+      : sealHeaders(
+          deps,
+          id,
+          mergeHeaderPatches(
+            existing.headersEnc ? deps.cipher.headers.open(existing.headersEnc, id) : [],
+            headers,
+          ),
+        )
   const sealedStorage =
     browserStorage === undefined ? {} : sealBrowserStorage(deps, id, browserStorage)
   deps.db

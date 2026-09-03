@@ -60,6 +60,69 @@ describe('siteService', () => {
     expect(loadSiteWithHeaders(deps, s.id)?.headers).toEqual([])
   })
 
+  describe('update merges header rows against the stored set', () => {
+    const stored = [
+      { name: 'Authorization', value: 'Bearer old' },
+      { name: 'Cookie', value: 'token=old' },
+    ]
+
+    it('a row without value keeps the stored value; a row with value replaces it', () => {
+      const s = createSite(deps, { ...base, headers: stored })
+      const updated = updateSite(deps, s.id, {
+        ...base,
+        headers: [{ name: 'Authorization' }, { name: 'Cookie', value: 'token=new' }],
+      })
+      expect(updated.headerNames).toEqual(['Authorization', 'Cookie'])
+      expect(loadSiteWithHeaders(deps, s.id)?.headers).toEqual([
+        { name: 'Authorization', value: 'Bearer old' },
+        { name: 'Cookie', value: 'token=new' },
+      ])
+    })
+
+    it('a stored name missing from the list is deleted', () => {
+      const s = createSite(deps, { ...base, headers: stored })
+      updateSite(deps, s.id, { ...base, headers: [{ name: 'Cookie' }] })
+      expect(loadSiteWithHeaders(deps, s.id)?.headers).toEqual([
+        { name: 'Cookie', value: 'token=old' },
+      ])
+    })
+
+    it('a new name with a value is added alongside kept rows', () => {
+      const s = createSite(deps, { ...base, headers: stored })
+      updateSite(deps, s.id, {
+        ...base,
+        headers: [{ name: 'Authorization' }, { name: 'Cookie' }, { name: 'X-Api-Key', value: 'k' }],
+      })
+      expect(loadSiteWithHeaders(deps, s.id)?.headers).toEqual([
+        ...stored,
+        { name: 'X-Api-Key', value: 'k' },
+      ])
+    })
+
+    it('a row without value whose name is not stored is a 422 and writes nothing', () => {
+      const s = createSite(deps, { ...base, headers: stored })
+      let caught: unknown
+      try {
+        updateSite(deps, s.id, {
+          ...base,
+          name: 'renamed',
+          headers: [{ name: 'Authorization' }, { name: 'X-Missing' }, { name: 'authorization' }],
+        })
+      } catch (e) {
+        caught = e
+      }
+      expect(caught).toBeInstanceOf(ServiceError)
+      const err = caught as ServiceError
+      expect(err.statusCode).toBe(422)
+      expect(err.code).toBe('VALIDATION')
+      expect(err.message).toContain('X-Missing')
+      expect(err.message).toContain('authorization')
+      expect(err.message).not.toContain('old')
+      expect(getSite(deps.db, s.id)?.name).toBe('shop')
+      expect(loadSiteWithHeaders(deps, s.id)?.headers).toEqual(stored)
+    })
+  })
+
   it('seals browser storage like headers: names exposed, values write-only, [] clears', () => {
     const storage = [
       { kind: 'localStorage' as const, name: 'token', value: 'eyJ.secret' },

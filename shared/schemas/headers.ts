@@ -1,16 +1,46 @@
 import { z } from 'zod'
 
-export const HeaderSchema = z.object({
-  name: z
-    .string()
-    .min(1)
-    .regex(/^[^\s:]+$/, 'header name must not contain whitespace or ":"'),
-  value: z
-    .string()
-    .min(1)
-    .regex(/^[^\r\n]*$/, 'header value must not contain CR/LF'),
-})
+const HeaderName = z
+  .string()
+  .min(1)
+  .regex(/^[^\s:]+$/, 'header name must not contain whitespace or ":"')
 
-export const HeadersSchema = z.array(HeaderSchema).max(20)
+const HeaderValue = z
+  .string()
+  .min(1)
+  .regex(/^[^\r\n]*$/, 'header value must not contain CR/LF')
+
+export const HeaderSchema = z.object({ name: HeaderName, value: HeaderValue })
+
+/** One row of a site update: a missing `value` means "keep the stored value
+ * for this name" — the merge itself lives in `siteService.updateSite`. */
+export const HeaderPatchSchema = z.object({ name: HeaderName, value: HeaderValue.optional() })
+
+const HEADERS_MAX = 20
+
+/** Names are matched exactly (case-sensitive) — the same rule the update
+ * merge uses — so two rows with the same name would be ambiguous. */
+function rejectDuplicateNames(rows: { name: string }[], ctx: z.RefinementCtx) {
+  const seen = new Set<string>()
+  for (const [index, row] of rows.entries()) {
+    if (seen.has(row.name))
+      ctx.addIssue({
+        code: 'custom',
+        path: [index, 'name'],
+        message: `duplicate header name "${row.name}"`,
+      })
+    seen.add(row.name)
+  }
+}
+
+export const HeadersSchema = z
+  .array(HeaderSchema)
+  .max(HEADERS_MAX)
+  .superRefine(rejectDuplicateNames)
+export const HeaderPatchesSchema = z
+  .array(HeaderPatchSchema)
+  .max(HEADERS_MAX)
+  .superRefine(rejectDuplicateNames)
 
 export type Header = z.infer<typeof HeaderSchema>
+export type HeaderPatch = z.infer<typeof HeaderPatchSchema>
