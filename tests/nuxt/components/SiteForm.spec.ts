@@ -166,6 +166,39 @@ describe('SiteForm', () => {
     expect(payload.zapFeSpiderMaxMinutes).toBe(5)
   })
 
+  // One site field, two boxes: zap-fe's active scan spends the same budget as
+  // zap-api's, so the value must stay identical whichever box is edited.
+  it('keeps the two Active scan max minutes boxes in sync and submits one value', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    const fe = () => wrapper.find('[data-testid="zap-fe-active-scan-max-minutes"]')
+    const api = () => wrapper.find('[data-testid="zap-api-max-minutes"]')
+    expect((fe().element as HTMLInputElement).value).toBe('45')
+
+    await fe().setValue('12')
+    expect((api().element as HTMLInputElement).value).toBe('12')
+    await api().setValue('30')
+    expect((fe().element as HTMLInputElement).value).toBe('30')
+
+    await wrapper.find('[data-testid="name"]').setValue('Example')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+    expect(emittedSubmit(wrapper).zapApiMaxMinutes).toBe(30)
+  })
+
+  it('falls back to the schema default when the frontend Active scan box is cleared', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    await wrapper.find('[data-testid="name"]').setValue('Example')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
+    await wrapper.find('[data-testid="zap-fe-active-scan-max-minutes"]').setValue('')
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+
+    expect(emittedSubmit(wrapper).zapApiMaxMinutes).toBe(45)
+  })
+
   it('renders header value inputs as password fields that are never prefilled', async () => {
     const wrapper = await mountSuspended(SiteForm, {
       props: { submitting: false, errorMessage: null },
@@ -363,6 +396,8 @@ describe('SiteForm', () => {
     expect(within('section-zap-fe', 'add-storage')).toBe(true)
     expect(within('section-zap-api', 'openapi-json')).toBe(true)
     expect(within('section-zap-api', 'zap-api-max-minutes')).toBe(true)
+    // the shared active-scan budget is reachable from the frontend section too
+    expect(within('section-zap-fe', 'zap-fe-active-scan-max-minutes')).toBe(true)
     expect(within('section-active', 'allow-mutating-requests')).toBe(true)
     expect(within('section-auth', 'add-header')).toBe(true)
   })

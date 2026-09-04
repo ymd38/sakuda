@@ -413,6 +413,30 @@ function handleSubmit() {
         </p>
       </div>
 
+      <!-- The same site field as the ZAP API section's box: one active-scan
+           budget, shown wherever an engine spends it. -->
+      <div class="flex flex-col gap-2 sm:max-w-80">
+        <label
+          for="site-zap-fe-active-scan-max-minutes"
+          class="text-caption-md font-medium text-ink"
+          >Active scan max minutes</label
+        >
+        <input
+          id="site-zap-fe-active-scan-max-minutes"
+          v-model.number="form.zapApiMaxMinutes"
+          data-testid="zap-fe-active-scan-max-minutes"
+          type="number"
+          required
+          min="1"
+          max="600"
+          class="input-pill"
+        />
+        <p class="text-caption-sm text-mute">
+          Caps the frontend active scan, which runs only when Active injection checks (below) is on.
+          Shared with the ZAP API section — editing it here changes it there too.
+        </p>
+      </div>
+
       <div class="flex flex-col gap-2">
         <label for="site-discovery-seed-paths" class="text-caption-md font-medium text-ink"
           >Discovery seed paths
@@ -566,8 +590,8 @@ function handleSubmit() {
           class="input-pill"
         />
         <p class="text-caption-sm text-mute">
-          Caps ZAP's active scan: the API scan, and the frontend active scan when Active injection
-          checks (below) is on.
+          Caps the API scan. Shared with the ZAP frontend section, whose active scan it caps too
+          when Active injection checks (below) is on — editing it here changes it there.
         </p>
       </div>
     </fieldset>
