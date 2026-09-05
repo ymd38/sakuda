@@ -6,7 +6,7 @@ import {
   createBrowserStorageCipher,
   createHeaderCipher,
   createSiteCipher,
-  headersToNucleiArgs,
+  headersToHeaderArgs,
 } from '../headerCipher'
 
 const key = randomBytes(32).toString('base64')
@@ -80,8 +80,8 @@ describe('createHeaderCipher', () => {
     expect(() => c.open(envelope, siteId)).toThrow(DecryptError)
   })
 
-  it('headersToNucleiArgs formats -H pairs', () => {
-    expect(headersToNucleiArgs(headers)).toEqual([
+  it('headersToHeaderArgs formats -H pairs', () => {
+    expect(headersToHeaderArgs(headers)).toEqual([
       '-H',
       'Cookie: a=b; c=d',
       '-H',

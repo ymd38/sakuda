@@ -51,6 +51,7 @@ const EnvSchema = z.object({
     .min(1, 'SAKUDA_NUCLEI_DAST_TEMPLATES must not be empty')
     .default('/opt/nuclei-templates/dast'),
   SAKUDA_NUCLEI_MAX_MINUTES: z.coerce.number().int().positive().default(60),
+  SAKUDA_KATANA_BIN: z.string().default('katana'),
   SAKUDA_ZAP_CMD: z.string().default('zap.sh'),
   SAKUDA_ZAP_WORKDIR: optionalString,
   SAKUDA_ZAP_MAX_HEAP: z
@@ -74,6 +75,8 @@ export interface Env {
   migrationsDir: string
   localhostAlias: string | undefined
   nuclei: { bin: string; templatesDir: string; dastTemplatesDir: string; maxMinutes: number }
+  /** katana's time budget is the site's `zapFeSpiderMaxMinutes` — no env knob. */
+  katana: { bin: string }
   zap: {
     cmd: string
     workDir: string | undefined
@@ -108,6 +111,7 @@ export function parseEnv(raw: NodeJS.ProcessEnv): Env {
       dastTemplatesDir: v.SAKUDA_NUCLEI_DAST_TEMPLATES,
       maxMinutes: v.SAKUDA_NUCLEI_MAX_MINUTES,
     },
+    katana: { bin: resolveExecutablePath(v.SAKUDA_KATANA_BIN) },
     zap: {
       cmd: resolveExecutablePath(v.SAKUDA_ZAP_CMD),
       workDir: v.SAKUDA_ZAP_WORKDIR,

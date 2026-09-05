@@ -87,6 +87,7 @@ Override per invocation with `make up SAKUDA_PORT=3005`.
 | `SAKUDA_NUCLEI_TEMPLATES`      | `/opt/nuclei-templates/http`                              | Pinned nuclei-templates checkout.                                                                                                |
 | `SAKUDA_NUCLEI_DAST_TEMPLATES` | `/opt/nuclei-templates/dast`                              | DAST (fuzzing) templates, loaded only for sites with "Active injection checks" on.                                               |
 | `SAKUDA_NUCLEI_MAX_MINUTES`    | `60`                                                      | Hard timeout for a nuclei run.                                                                                                   |
+| `SAKUDA_KATANA_BIN`            | `katana` (`/usr/local/bin/katana` in the image)           | Path to the katana binary (discovery's second URL source). Its time budget is the site's spider minutes; no separate knob.       |
 | `SAKUDA_ZAP_CMD`               | `zap.sh` (`/zap/zap.sh` in the image)                     | ZAP entrypoint. Dev on macOS: `./scripts/zap-docker.sh`.                                                                         |
 | `SAKUDA_ZAP_WORKDIR`           | _(unset)_                                                 | Container-side path when ZAP sees the scan work dir at a different path than the host (the dev wrapper mounts it at `/zap/wrk`). |
 | `SAKUDA_ZAP_MAX_HEAP`          | `1024m`                                                   | `-Xmx` passed to ZAP via `JAVA_TOOL_OPTIONS`.                                                                                    |
@@ -106,11 +107,14 @@ pnpm install
 make env                    # .env with a fresh key (or: cp .env.example .env && pnpm keygen)
 ```
 
-nuclei runs as a native binary and ZAP runs via Docker in dev:
+nuclei and katana run as native binaries and ZAP runs via Docker in dev:
 
 - Install nuclei locally (e.g. `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest`)
   and clone [nuclei-templates](https://github.com/projectdiscovery/nuclei-templates),
   then point `.env` at them: `SAKUDA_NUCLEI_BIN`, `SAKUDA_NUCLEI_TEMPLATES`.
+- Install katana locally (`go install github.com/projectdiscovery/katana/cmd/katana@v1.7.0`,
+  the version pinned in the Dockerfile) and point `SAKUDA_KATANA_BIN` at it. Without
+  it, discovery still works on ZAP alone and reports the missing binary as a warning.
 - ZAP runs inside Docker via `scripts/zap-docker.sh` (no local ZAP install
   needed). Set in `.env`:
   ```
@@ -164,9 +168,18 @@ site (`/path` or `api:/path`, relative to the base URLs). On the site page:
 1. **Discover URLs** runs ZAP's traditional + Ajax spiders from the seed path
    (each for up to `zapFeSpiderMaxMinutes`, with the site's headers) and dumps
    ZAP's site tree — every URL the crawl requested, not only the ones that
-   raised an alert. Off-origin URLs, static assets, socket.io transports,
-   stack-trace pseudo-paths and `excludePaths` matches are dropped; the panel
-   shows how many and why.
+   raised an alert. In parallel, **katana** crawls the same seeds in static
+   mode with JS-bundle parsing (`-jc`, depth 3, same time budget, same
+   headers): it picks up the API paths that only exist as string literals in
+   the app's bundles (`/api/Feedbacks`, `/rest/user/whoami`, …), which no
+   spider ever clicks its way to. The two lists are merged (ZAP wins a tie)
+   and each row shows its `source` — `spider`, `ajax` or `katana`. katana is
+   scoped to the front host (`-fs fqdn`), so an `apiBaseUrl` on another origin
+   is left to ZAP; and if katana fails or is missing, the ZAP result is kept
+   and the failure is shown as a warning. Off-origin URLs, static assets,
+   socket.io transports, stack-trace pseudo-paths, `excludePaths` matches and
+   katana's regex artifacts (strings it scraped but never requested, `%5C%22`
+   fragments) are dropped; the panel shows how many and why.
 2. Tick the URLs you want scanned (everything not yet saved is pre-selected),
    add paths by hand if you like, and **Save to targets**. Saving appends to
    the list and never duplicates a path.
@@ -205,8 +218,8 @@ not for static assets (those are dropped from the target list automatically).
 
 A site runs one job at a time: a discovery is refused while a scan is
 queued/running and vice versa. Discovery artifacts (ZAP plan, logs, the
-site-tree dump) live under `<data dir>/discoveries/<id>` and are removed with
-the site.
+site-tree dump; katana's seeds, logs and JSONL under `katana/`) live under
+`<data dir>/discoveries/<id>` and are removed with the site.
 
 ## Not in this MVP
 

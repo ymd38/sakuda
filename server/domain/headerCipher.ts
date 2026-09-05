@@ -129,6 +129,7 @@ export function createSiteCipher(keyBase64: string): SiteCipher {
   }
 }
 
-export function headersToNucleiArgs(headers: Header[]): string[] {
+/** `-H "Name: value"` pairs as nuclei and katana both take them. */
+export function headersToHeaderArgs(headers: Header[]): string[] {
   return headers.flatMap((h) => ['-H', `${h.name}: ${h.value}`])
 }

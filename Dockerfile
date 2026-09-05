@@ -9,10 +9,12 @@
 #   - NODE_VERSION: 22.23.2 (latest Node 22 "Jod" LTS, nodejs.org/dist/index.json)
 #   - NUCLEI_VERSION: 3.11.1 (github.com/projectdiscovery/nuclei latest release)
 #   - NUCLEI_TEMPLATES_TAG: v10.4.8 (github.com/projectdiscovery/nuclei-templates latest release)
+#   - KATANA_VERSION: 1.7.0 (github.com/projectdiscovery/katana latest release)
 ARG ZAP_VERSION=2.17.0
 ARG NODE_VERSION=22.23.2
 ARG NUCLEI_VERSION=3.11.1
 ARG NUCLEI_TEMPLATES_TAG=v10.4.8
+ARG KATANA_VERSION=1.7.0
 
 FROM node:${NODE_VERSION}-bookworm-slim AS build
 WORKDIR /app
@@ -29,7 +31,7 @@ COPY . .
 RUN pnpm build
 
 FROM ghcr.io/zaproxy/zaproxy:${ZAP_VERSION}
-ARG NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG TARGETARCH
+ARG NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG KATANA_VERSION TARGETARCH
 USER root
 
 # ZAP's Debian base already ships curl, unzip and git; if that ever changes,
@@ -52,6 +54,14 @@ RUN set -eux; \
     git clone --depth 1 --branch "${NUCLEI_TEMPLATES_TAG}" https://github.com/projectdiscovery/nuclei-templates /opt/nuclei-templates; \
     rm -rf /opt/nuclei-templates/.git
 
+# katana (checksum-verified; static crawl only, no headless browser). Note the
+# checksums asset is `katana-<ver>-checksums.txt` (hyphens), unlike nuclei's.
+RUN set -eux; \
+    curl -fsSLO "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana_${KATANA_VERSION}_linux_${TARGETARCH}.zip"; \
+    curl -fsSLO "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana-${KATANA_VERSION}-checksums.txt"; \
+    grep "katana_${KATANA_VERSION}_linux_${TARGETARCH}.zip" "katana-${KATANA_VERSION}-checksums.txt" | sha256sum -c -; \
+    unzip -o "katana_${KATANA_VERSION}_linux_${TARGETARCH}.zip" katana -d /usr/local/bin; chmod 755 /usr/local/bin/katana; rm -f katana_* katana-*
+
 WORKDIR /app
 COPY --from=build --chown=zap:zap /app/.output ./.output
 COPY --chown=zap:zap server/db/migrations ./migrations
@@ -62,6 +72,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 HOME=/home/zap \
     SAKUDA_DATA_DIR=/data SAKUDA_MIGRATIONS_DIR=/app/migrations \
     SAKUDA_NUCLEI_BIN=/usr/local/bin/nuclei SAKUDA_NUCLEI_TEMPLATES=/opt/nuclei-templates/http \
     SAKUDA_NUCLEI_DAST_TEMPLATES=/opt/nuclei-templates/dast \
+    SAKUDA_KATANA_BIN=/usr/local/bin/katana \
     SAKUDA_ZAP_CMD=/zap/zap.sh SAKUDA_LOCALHOST_ALIAS=host.docker.internal
 EXPOSE 3000
 VOLUME ["/data"]

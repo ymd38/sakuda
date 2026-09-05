@@ -173,7 +173,7 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
       </p>
       <p v-else-if="!currentId" class="text-caption-md text-mute">
         No discovery yet. ZAP's spiders crawl for up to {{ site.zapFeSpiderMaxMinutes }} min each
-        (traditional + Ajax per seed).
+        (traditional + Ajax per seed), and katana parses the JS bundles for API paths in parallel.
       </p>
     </div>
 

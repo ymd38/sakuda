@@ -4,7 +4,7 @@ import { EnvError, getEnv } from '../config/env'
 import { closeDb, getDb } from '../db/client'
 import { createSiteCipher } from '../domain/headerCipher'
 import { engineRunners } from '../engines'
-import { runZapDiscover } from '../engines/zap/zapDiscover'
+import { runDiscover } from '../engines/discover'
 import { createJobLoop } from '../services/jobLoop'
 import { recoverInterruptedDiscoveries } from '../services/discoveryService'
 import { recoverInterruptedScans } from '../services/scanService'
@@ -41,7 +41,7 @@ export default defineNitroPlugin((nitroApp) => {
     env,
     cipher: createSiteCipher(env.encryptionKey),
     runners: engineRunners,
-    discover: runZapDiscover,
+    discover: runDiscover,
     logger,
     now: () => new Date(),
     id: randomUUID,

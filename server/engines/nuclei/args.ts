@@ -1,4 +1,4 @@
-import { headersToNucleiArgs } from '../../domain/headerCipher'
+import { headersToHeaderArgs } from '../../domain/headerCipher'
 import type { Header } from '#shared/schemas/headers'
 
 export interface NucleiArgsInput {
@@ -56,6 +56,6 @@ export function buildNucleiArgs(i: NucleiArgsInput): string[] {
     '-duc',
     '-nc',
     '-omit-raw',
-    ...headersToNucleiArgs(i.headers),
+    ...headersToHeaderArgs(i.headers),
   ]
 }

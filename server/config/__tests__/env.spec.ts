@@ -20,6 +20,7 @@ describe('parseEnv', () => {
     expect(env.nuclei.maxMinutes).toBe(60)
     expect(env.nuclei.templatesDir).toBe('/opt/nuclei-templates/http')
     expect(env.nuclei.dastTemplatesDir).toBe('/opt/nuclei-templates/dast')
+    expect(env.katana.bin).toBe('katana')
     expect(env.zap.cmd).toBe('zap.sh')
     expect(env.jobRunner).toBe(true)
   })
