@@ -92,6 +92,8 @@ describe('buildZapFePlan', () => {
     ])
     // threadPerHost 1: the DOM XSS rule opens one headless Firefox per scan
     // thread, and ZAP's default (2 × CPU cores) OOM-kills a 4 GB container.
+    // The FE scan keeps that rule on (no policyDefinition) — it is the whole
+    // point of scanning a frontend.
     expect(on[3]).toEqual({
       type: 'activeScan',
       parameters: {
@@ -101,6 +103,7 @@ describe('buildZapFePlan', () => {
         threadPerHost: 1,
       },
     })
+    expect(on[3]).not.toHaveProperty('policyDefinition')
 
     // Off: the plan is exactly the default one, job for job.
     expect(jobsOf(buildZapFePlan(base))).toEqual(on.filter((j) => j.type !== 'activeScan'))
@@ -242,6 +245,10 @@ describe('buildZapApiPlan', () => {
         {
           type: 'activeScan',
           parameters: { context: 'sakuda', maxScanDurationInMins: 10, maxAlertsPerRule: 20 },
+          // `policyDefinition` is a sibling of `parameters`; only the DOM XSS
+          // rule is off (a per-rule threshold, not `defaultThreshold`, which
+          // would silence every rule).
+          policyDefinition: { rules: [{ id: 40026, threshold: 'Off' }] },
         },
         { type: 'passiveScan-wait', parameters: { maxDuration: 5 } },
         {

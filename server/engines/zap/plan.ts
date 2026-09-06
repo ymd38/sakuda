@@ -127,11 +127,19 @@ const requestorJob = (urls: string[]) => ({
   requests: urls.map((url) => ({ url, method: 'GET' })),
 })
 
-/** Default policy, hard-capped by `maxScanDurationInMins`. */
+/** AF `policyDefinition` for an activeScan job — a sibling of `parameters`,
+ * like `requests` on the requestor job. Only per-rule thresholds are used:
+ * `defaultThreshold: Off` would silence every rule. */
+interface ZapScanPolicy {
+  rules: Array<{ id: number; threshold: 'Off' | 'Low' | 'Medium' | 'High' }>
+}
+
+/** Default policy unless `policy` is given, hard-capped by `maxScanDurationInMins`. */
 const activeScanJob = (
   contextName: string,
   maxScanMinutes: number,
   extra: Record<string, unknown> = {},
+  policy?: ZapScanPolicy,
 ) => ({
   type: 'activeScan',
   parameters: {
@@ -140,7 +148,13 @@ const activeScanJob = (
     maxAlertsPerRule: 20,
     ...extra,
   },
+  ...(policy ? { policyDefinition: policy } : {}),
 })
+
+/** ZAP's DOM XSS rule opens one headless Firefox per scan thread — the one
+ * active-scan rule that needs a browser. Both active scans below deal with
+ * it, each in the way that fits the target (see the two constants). */
+const DOM_XSS_RULE_ID = 40026
 
 /** The FE active scan runs the DOM XSS rule, which opens one headless
  * Firefox per scan thread: ZAP's default (2 × CPU cores) OOM-killed a 4 GB
@@ -148,6 +162,14 @@ const activeScanJob = (
  * the Ajax spider gets (`numberOfBrowsers: 1`). Its runtime is unpredictable,
  * hence the hard cap. */
 const FE_ACTIVE_SCAN_PARAMS = { threadPerHost: 1 }
+
+/** The API active scan keeps ZAP's default thread count for speed and drops
+ * the DOM XSS rule instead: an API answers JSON, so DOM XSS is not its
+ * concern, and with the rule on every thread launched a Firefox — SIGKILL
+ * seconds after `Job activeScan started` on a 4 GB / 4 CPU container. */
+const API_ACTIVE_SCAN_POLICY: ZapScanPolicy = {
+  rules: [{ id: DOM_XSS_RULE_ID, threshold: 'Off' }],
+}
 
 const reportJobs = (reportDir: string) => [
   {
@@ -224,7 +246,7 @@ export function buildZapApiPlan(i: ZapApiPlanInput): Record<string, unknown> {
         type: 'openapi',
         parameters: { ...i.openapi, targetUrl: i.targetUrl, context: i.context.name },
       },
-      activeScanJob(i.context.name, i.maxScanMinutes),
+      activeScanJob(i.context.name, i.maxScanMinutes, {}, API_ACTIVE_SCAN_POLICY),
       { type: 'passiveScan-wait', parameters: { maxDuration: i.passiveMaxMinutes } },
       ...reportJobs(i.reportDir),
     ],
