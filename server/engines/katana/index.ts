@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { normalizeCrawledEntries } from '../../domain/crawledUrls'
+import { crawledUrlKey, normalizeCrawledEntries } from '../../domain/crawledUrls'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { runCommand } from '../runCommand'
 import { EngineError, OOM_RUNBOOK, type DiscoverInput, type DiscoverOutput } from '../types'
@@ -78,8 +78,11 @@ export async function runKatanaCrawl({
       result.oomKilled ? OOM_RUNBOOK : undefined,
     )
   const { kept: real, dropped: katanaDropped } = dropKatanaArtifacts(entries)
-  const { kept, dropped } = normalizeCrawledEntries(site, real, (e) =>
-    restoreLoopbackHost(e.url, env.localhostAlias, originalHost),
+  const { kept, dropped } = normalizeCrawledEntries(
+    site,
+    real,
+    (e) => restoreLoopbackHost(e.url, env.localhostAlias, originalHost),
+    { dedupeKeyOf: (e, url) => crawledUrlKey(e.method, url) },
   )
   const urls = kept.map(({ url, entry }) => ({
     url,

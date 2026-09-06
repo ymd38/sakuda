@@ -52,6 +52,28 @@ describe('expandNucleiTargets', () => {
     const { urls } = expandNucleiTargets({ ...site, apiBaseUrl: null, nucleiPaths: 'api:/v1/x' })
     expect(urls).toEqual([])
   })
+
+  it('keeps only GET lines, counts non-GET in skippedMethods (before dedupe/exclusion), and never downgrades', () => {
+    const r = expandNucleiTargets({
+      ...site,
+      nucleiPaths: '/get\nPOST /p\nPOST /p\nDELETE /d\napi:/g\nHEAD /h',
+    })
+    expect(r.urls).toEqual(['http://localhost:3000/get', 'http://localhost:8080/g'])
+    expect(r.skippedMethods).toEqual({ POST: 2, DELETE: 1, HEAD: 1 })
+    expect(r.configured).toBe(true)
+  })
+
+  it('does not expose a skipped non-GET path via excluded', () => {
+    const r = expandNucleiTargets({ ...site, nucleiPaths: 'POST /secret', excludePaths: '/secret' })
+    expect(r.excluded).toEqual([])
+    expect(r.skippedMethods).toEqual({ POST: 1 })
+  })
+
+  it('the root fallback (no saved lines) is GET and reports no skips', () => {
+    const r = expandNucleiTargets({ ...site, nucleiPaths: '' })
+    expect(r.configured).toBe(false)
+    expect(r.skippedMethods).toEqual({})
+  })
 })
 
 describe('zapFeRequestTargets', () => {

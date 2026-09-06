@@ -5,7 +5,7 @@ import type {
   DiscoverySummary,
   SitePublic,
 } from '#shared/types/api'
-import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
+import { parseNucleiPathLines, targetLineKey } from '#shared/utils/nucleiPaths'
 import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
 import { urlToTargetLine } from '#shared/utils/targetLines'
 
@@ -72,17 +72,22 @@ interface ReviewRow {
 
 const savedKeys = computed(() => {
   const parsed = parseNucleiPathLines(props.site.nucleiPaths)
-  return new Set(parsed.lines.map((l) => `${l.base}|${l.path}`))
+  return new Set(parsed.lines.map(targetLineKey))
 })
 
-function lineKey(line: string): string {
-  return line.startsWith('api:') ? `api|${line.slice(4)}` : `front|${line}`
+/** The method|base|path key of a produced target line, or null if it does
+ * not parse (never, for a line urlToTargetLine built) — matches the saved
+ * key set so a re-discovered target shows as already saved. */
+function lineKey(line: string): string | null {
+  const only = parseNucleiPathLines(line).lines[0]
+  return only ? targetLineKey(only) : null
 }
 
 const rows = computed<ReviewRow[]>(() =>
   (detail.value?.urls ?? []).map((url) => {
-    const line = urlToTargetLine(props.site, url.url)
-    return { url, line, saved: line !== null && savedKeys.value.has(lineKey(line)) }
+    const line = urlToTargetLine(props.site, url.url, url.method)
+    const key = line !== null ? lineKey(line) : null
+    return { url, line, saved: key !== null && savedKeys.value.has(key) }
   }),
 )
 const selectableLines = computed(() =>
@@ -225,6 +230,7 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
             <thead>
               <tr class="text-mute text-left">
                 <th class="pb-2" />
+                <th class="pb-2">Method</th>
                 <th class="pb-2">Target path</th>
                 <th class="pb-2">Status</th>
                 <th class="pb-2">Source</th>
@@ -233,7 +239,7 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
             <tbody>
               <tr
                 v-for="row in rows"
-                :key="row.url.url"
+                :key="`${row.url.method} ${row.url.url}`"
                 class="border-hairline-soft border-t"
                 data-testid="discovered-url"
               >
@@ -246,6 +252,9 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
                     :data-testid="`discovered-url-checkbox`"
                     @change="toggle(row.line)"
                   />
+                </td>
+                <td class="py-1 pr-2 align-top font-mono" data-testid="discovered-url-method">
+                  {{ row.url.method }}
                 </td>
                 <td class="py-1 pr-4 align-top break-all">
                   {{ row.line ?? row.url.url }}

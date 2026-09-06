@@ -149,8 +149,20 @@ export const emptyCrawledUrlsDropped = (): CrawledUrlsDropped => ({
 
 export const DEFAULT_MAX_DISCOVERED_URLS = 500
 
-export interface NormalizeCrawledOptions {
+/** Dedupe key for a discovered entry: uppercased method + normalized URL, so
+ * a `GET` and a `POST` of the same URL are two targets while `get`/`GET`
+ * collapse. Pass as `dedupeKeyOf` to {@link normalizeCrawledEntries}. */
+export function crawledUrlKey(method: string, normalizedUrl: string): string {
+  return `${method.trim().toUpperCase()}|${normalizedUrl}`
+}
+
+export interface NormalizeCrawledOptions<T = unknown> {
   maxUrls?: number
+  /** Dedupe identity of an entry, given the entry and its normalized URL.
+   * Defaults to the URL alone. Discovery passes `method|url` so a GET and a
+   * POST of the same URL are kept as two distinct targets (Epic #41) rather
+   * than collapsed into one. */
+  dedupeKeyOf?: (entry: T, normalizedUrl: string) => string
 }
 
 /** Filters, dedupes (first occurrence wins, crawl order preserved) and caps
@@ -161,9 +173,10 @@ export function normalizeCrawledEntries<T>(
   site: CrawlScopeSite,
   entries: T[],
   urlOf: (entry: T) => string,
-  opts?: NormalizeCrawledOptions,
+  opts?: NormalizeCrawledOptions<T>,
 ): { kept: Array<{ url: string; entry: T }>; dropped: CrawledUrlsDropped } {
   const maxUrls = opts?.maxUrls ?? DEFAULT_MAX_DISCOVERED_URLS
+  const keyOf = opts?.dedupeKeyOf ?? ((_e: T, url: string) => url)
   const patterns = parseExcludePatterns(site.excludePaths)
   const scope = resolveCrawlScope(site)
   const dropped = emptyCrawledUrlsDropped()
@@ -175,8 +188,9 @@ export function normalizeCrawledEntries<T>(
       dropped[c.reason]++
       continue
     }
-    if (seen.has(c.url)) continue
-    seen.add(c.url)
+    const key = keyOf(entry, c.url)
+    if (seen.has(key)) continue
+    seen.add(key)
     if (kept.length >= maxUrls) {
       dropped.capped++
       continue

@@ -43,9 +43,14 @@ const input: DiscoverInput = {
   signal: new AbortController().signal,
 }
 
-const url = (path: string, source: DiscoveredUrl['source'], statusCode = 200): DiscoveredUrl => ({
+const url = (
+  path: string,
+  source: DiscoveredUrl['source'],
+  statusCode = 200,
+  method = 'GET',
+): DiscoveredUrl => ({
   url: `http://localhost:3000${path}`,
-  method: 'GET',
+  method,
   statusCode,
   source,
 })
@@ -99,6 +104,17 @@ describe('createDiscoverRunner', () => {
       merged: { urlCount: 4, duplicates: 1, capped: 0 },
     })
     expect(out.exitCode).toBe(0)
+  })
+
+  it('keeps a GET/POST pair on the same URL across sources (dedupe is method|url)', async () => {
+    const zap = output([url('/x', 'spider', 200, 'GET')])
+    const katana = output([url('/x', 'katana', 405, 'POST'), url('/x', 'katana', 200, 'GET')])
+    const run = createDiscoverRunner({ zap: resolved(zap), katana: resolved(katana) })
+
+    const out = await run(input)
+    // GET /x (ZAP wins) + POST /x survive; katana's duplicate GET /x is dropped
+    expect(out.urls).toEqual([url('/x', 'spider', 200, 'GET'), url('/x', 'katana', 405, 'POST')])
+    expect(out.meta.merged).toEqual({ urlCount: 2, duplicates: 1, capped: 0 })
   })
 
   it('applies one overall cap across both sources', async () => {

@@ -17,14 +17,16 @@ import { buildNucleiArgs, nucleiTagsFor } from './args'
 import { normalizeNucleiLines, parseNucleiJsonl, parseNucleiStats } from './normalize'
 
 export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
-  const { urls: allUrls, excluded } = expandNucleiTargets(site)
+  const { urls: allUrls, excluded, skippedMethods } = expandNucleiTargets(site)
   // Hash routes (`/#/search?q=`) are SPA client routes: the fragment never
   // reaches the server, so requesting one just GETs `/`. nuclei is
   // server-side, so it cannot test them — they are handled by the zap-fe DOM
   // XSS probe instead (see domXssProbeScript). Drop them here.
   const urls = allUrls.filter((u) => !u.includes('#'))
   if (urls.length === 0)
-    throw new EngineError('nuclei: no target URLs (nucleiPaths is empty or every path is excluded)')
+    throw new EngineError(
+      'nuclei: no GET target URLs (nucleiPaths is empty, every path is excluded, or every saved line is a non-GET method, which is not replayed yet)',
+    )
   const originalHost = new URL(site.frontBaseUrl).hostname
   const targetsFile = join(workDir, 'targets.txt')
   const outputFile = join(workDir, 'findings.jsonl')
@@ -121,6 +123,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
     meta: {
       urlCount: urls.length,
       excludedUrls: excluded,
+      ...(Object.keys(skippedMethods).length > 0 ? { skippedMethods } : {}),
       tags,
       rateLimit: site.nucleiRateLimit,
       concurrency: 25,

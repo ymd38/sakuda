@@ -15,10 +15,20 @@ describe('urlToTargetLine', () => {
     expect(urlToTargetLine(site, 'http://localhost:8080/v1/users')).toBe('api:/v1/users')
   })
 
-  it('returns null for another origin, an unparsable value, or api origin without apiBaseUrl', () => {
+  it('prefixes a non-GET method (uppercased), never GET', () => {
+    expect(urlToTargetLine(site, 'http://localhost:3000/x', 'POST')).toBe('POST /x')
+    expect(urlToTargetLine(site, 'http://localhost:3000/x', 'get')).toBe('/x')
+    expect(urlToTargetLine(site, 'http://localhost:8080/v1/users', 'delete')).toBe(
+      'DELETE api:/v1/users',
+    )
+  })
+
+  it('returns null for another origin, an unparsable value, api origin without apiBaseUrl, or an unsupported method', () => {
     expect(urlToTargetLine(site, 'http://evil.example/x')).toBeNull()
     expect(urlToTargetLine(site, 'nope')).toBeNull()
     expect(urlToTargetLine({ ...site, apiBaseUrl: null }, 'http://localhost:8080/v1')).toBeNull()
+    // an unsupported verb is never offered for saving (mergeTargetLines rejects atomically)
+    expect(urlToTargetLine(site, 'http://localhost:3000/x', 'TRACE')).toBeNull()
   })
 })
 
@@ -49,10 +59,17 @@ describe('mergeTargetLines', () => {
     expect(r.added).toEqual([])
   })
 
-  it('rejects invalid lines without merging anything', () => {
-    const r = mergeTargetLines('/\n', ['/ok', 'http://absolute.example/x', 'no-slash'])
-    expect(r.invalid).toEqual(['http://absolute.example/x', 'no-slash'])
+  it('rejects invalid lines (incl. unsupported methods) without merging anything', () => {
+    const r = mergeTargetLines('/\n', ['/ok', 'http://absolute.example/x', 'TRACE /x'])
+    expect(r.invalid).toEqual(['http://absolute.example/x', 'TRACE /x'])
     expect(r.added).toEqual([])
     expect(r.text).toBe('/\n')
+  })
+
+  it('keys on method|base|path: a POST coexists with a saved GET, a re-saved GET (or bare) is a no-op', () => {
+    const r = mergeTargetLines('/x\n', ['POST /x', 'GET /x', '/x', 'POST /x'])
+    expect(r.added).toEqual(['POST /x'])
+    expect(r.skipped).toEqual(['GET /x', '/x', 'POST /x'])
+    expect(r.text).toBe('/x\nPOST /x\n')
   })
 })

@@ -198,8 +198,34 @@ describe('runNuclei', () => {
         logger,
         signal: new AbortController().signal,
       }),
-    ).rejects.toThrow(/no target URLs/)
+    ).rejects.toThrow(/no GET target URLs/)
     expect(existsSync(join(workDir, 'targets.txt'))).toBe(false)
+  })
+
+  it('replays only GET saved lines, skips non-GET into meta.skippedMethods, and never writes a non-GET target', async () => {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'skip')
+    const out = await runNuclei({
+      scanId: 'scan-skip',
+      engine: 'nuclei',
+      site: baseSite({ nucleiPaths: '/get-one\nPOST /api/x\nPOST /api/x\nDELETE /y\nHEAD /z' }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    expect(out.meta.skippedMethods).toEqual({ POST: 2, DELETE: 1, HEAD: 1 })
+    expect(out.meta.urlCount).toBe(1)
+    const targets = readFileSync(join(workDir, 'targets.txt'), 'utf8')
+    expect(targets).toContain('/get-one')
+    expect(targets).not.toContain('/api/x')
+    expect(targets).not.toContain('/y')
+    expect(targets).not.toContain('/z')
   })
 })
 

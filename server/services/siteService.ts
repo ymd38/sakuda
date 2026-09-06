@@ -5,6 +5,7 @@ import type { Db } from '../db/client'
 import { discoveries, scans, sites } from '../db/schema'
 import type { SiteCipher } from '../domain/headerCipher'
 import { toSitePublic } from '../domain/siteView'
+import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
 import { mergeTargetLines } from '#shared/utils/targetLines'
 import type { Logger } from '../lib/logger'
 import { ServiceError } from './errors'
@@ -147,15 +148,18 @@ export function addSiteTargets(
     throw new ServiceError(
       422,
       'VALIDATION',
-      `invalid target line(s): ${merged.invalid.join(', ')} — each line must be a path starting with "/" (optionally prefixed "api:")`,
+      `invalid target line(s): ${merged.invalid.join(', ')} — each line must be "[METHOD] [api:]/path": a path starting with "/", optionally prefixed with an HTTP method (default GET) and/or "api:"`,
       { invalid: merged.invalid },
     )
-  if (!existing.apiBaseUrl && merged.added.some((l) => l.startsWith('api:')))
+  const addedApiLines = merged.added.filter((l) =>
+    parseNucleiPathLines(l).lines.some((p) => p.base === 'api'),
+  )
+  if (!existing.apiBaseUrl && addedApiLines.length > 0)
     throw new ServiceError(
       422,
       'VALIDATION',
       'api: lines require apiBaseUrl to be set on the site',
-      { invalid: merged.added.filter((l) => l.startsWith('api:')) },
+      { invalid: addedApiLines },
     )
   if (merged.text.length > NUCLEI_PATHS_MAX_CHARS)
     throw new ServiceError(

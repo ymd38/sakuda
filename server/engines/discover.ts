@@ -1,4 +1,4 @@
-import { normalizeCrawledEntries, type CrawlScopeSite } from '../domain/crawledUrls'
+import { crawledUrlKey, normalizeCrawledEntries, type CrawlScopeSite } from '../domain/crawledUrls'
 import { runKatanaCrawl } from './katana'
 import type { DiscoverOutput, DiscoverRunner } from './types'
 import { runZapDiscover } from './zap/zapDiscover'
@@ -42,7 +42,9 @@ export function mergeDiscoverOutputs(
   // idempotent and gives cross-source dedupe (ZAP first, so its entry wins)
   // plus a single overall cap.
   const combined = [...zap.urls, ...katana.value.urls]
-  const { kept, dropped } = normalizeCrawledEntries(site, combined, (u) => u.url)
+  const { kept, dropped } = normalizeCrawledEntries(site, combined, (u) => u.url, {
+    dedupeKeyOf: (u, url) => crawledUrlKey(u.method, url),
+  })
   const urls = kept.map((k) => k.entry)
   const droppedTotal = Object.values(dropped).reduce((a, b) => a + b, 0)
   const duplicates = combined.length - urls.length - droppedTotal

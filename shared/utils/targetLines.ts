@@ -1,4 +1,9 @@
-import { parseNucleiPathLines } from './nucleiPaths'
+import {
+  normalizeTargetMethod,
+  parseNucleiPathLines,
+  targetLineKey,
+  type TargetMethod,
+} from './nucleiPaths'
 
 /** The site fields needed to turn an absolute URL back into a saved target
  * line (`/path?q=1` on the front base, `api:/path` on the api base). */
@@ -7,20 +12,34 @@ export interface TargetLineSite {
   apiBaseUrl: string | null
 }
 
-/** Converts a discovered absolute URL into the relative line format stored
- * in `sites.nucleiPaths` (SPEC §3.1: targets are relative to the base
- * URLs so a port/host change never requires rewriting them). Returns null
- * for a URL on neither base origin. */
-export function urlToTargetLine(site: TargetLineSite, url: string): string | null {
-  if (!URL.canParse(url)) return null
-  const u = new URL(url)
-  const rel = `${u.pathname}${u.search}`
-  if (u.origin === new URL(site.frontBaseUrl).origin) return rel
-  if (site.apiBaseUrl && u.origin === new URL(site.apiBaseUrl).origin) return `api:${rel}`
-  return null
+/** Renders a saved target line: `POST /x`, `api:/x`, `/x` (GET, no prefix). */
+function formatTargetLine(method: TargetMethod, base: 'front' | 'api', path: string): string {
+  const prefix = method === 'GET' ? '' : `${method} `
+  return `${prefix}${base === 'api' ? 'api:' : ''}${path}`
 }
 
-const lineKey = (base: 'front' | 'api', path: string) => `${base}|${path}`
+/** Converts a discovered absolute URL + method into the relative line format
+ * stored in `sites.nucleiPaths` (SPEC §3.1: targets are relative to the base
+ * URLs so a port/host change never requires rewriting them). `method`
+ * defaults to GET and is uppercased; returns null for a URL on neither base
+ * origin, or a method outside the allowlist (so an unsupported verb is never
+ * offered for saving — `mergeTargetLines` rejects the whole batch on one bad
+ * line). */
+export function urlToTargetLine(
+  site: TargetLineSite,
+  url: string,
+  method: string = 'GET',
+): string | null {
+  if (!URL.canParse(url)) return null
+  const m = normalizeTargetMethod(method)
+  if (m === null) return null
+  const u = new URL(url)
+  const path = `${u.pathname}${u.search}`
+  if (u.origin === new URL(site.frontBaseUrl).origin) return formatTargetLine(m, 'front', path)
+  if (site.apiBaseUrl && u.origin === new URL(site.apiBaseUrl).origin)
+    return formatTargetLine(m, 'api', path)
+  return null
+}
 
 export interface MergeTargetLinesResult {
   /** The new `nucleiPaths` text: existing text (comments and all) followed by the added lines. */
@@ -33,11 +52,14 @@ export interface MergeTargetLinesResult {
 }
 
 /** Appends `lines` to the saved target text, skipping duplicates of lines
- * already present and of each other. Existing content is preserved verbatim
- * (a user's comments and ordering are theirs), so this is append-only. */
+ * already present and of each other. Duplicate identity is method + base +
+ * path (see {@link targetLineKey}), so a saved `GET /x` does not block a new
+ * `POST /x`, but a re-saved `GET /x` (or bare `/x`) is a no-op. Existing
+ * content is preserved verbatim (a user's comments and ordering are theirs),
+ * so this is append-only. */
 export function mergeTargetLines(existing: string, lines: string[]): MergeTargetLinesResult {
   const current = parseNucleiPathLines(existing)
-  const seen = new Set(current.lines.map((l) => lineKey(l.base, l.path)))
+  const seen = new Set(current.lines.map(targetLineKey))
   const added: string[] = []
   const skipped: string[] = []
   const invalid: string[] = []
@@ -50,7 +72,7 @@ export function mergeTargetLines(existing: string, lines: string[]): MergeTarget
       invalid.push(line)
       continue
     }
-    const key = lineKey(only.base, only.path)
+    const key = targetLineKey(only)
     if (seen.has(key)) {
       skipped.push(line)
       continue

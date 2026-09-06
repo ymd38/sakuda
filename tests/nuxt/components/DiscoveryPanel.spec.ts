@@ -142,6 +142,34 @@ describe('DiscoveryPanel', () => {
     )
   })
 
+  it('shows the method column and saves a non-GET row as a "METHOD path" line', async () => {
+    endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
+    endpoint('/api/discoveries/disc-1', () =>
+      detailFixture({
+        urls: [
+          { url: 'http://localhost:4001/rest/x', method: 'POST', statusCode: 200, source: 'ajax' },
+        ],
+        warnings: [],
+      }),
+    )
+    let posted: unknown
+    endpoint('/api/sites/site-1/targets', {
+      method: 'POST',
+      handler: async (event) => {
+        posted = await readBody(event)
+        return { site: siteFixture(), added: ['POST /rest/x'], skipped: [] } as AddTargetsResult
+      },
+    })
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-testid="discovered-url-method"]').text()).toBe('POST')
+    const row = wrapper.find('[data-testid="discovered-url"]')
+    expect(row.text()).toContain('POST /rest/x')
+    await wrapper.find('[data-testid="save-targets"]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual({ lines: ['POST /rest/x'] })
+  })
+
   it('posts the selected lines plus manual lines, then emits the updated site', async () => {
     endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
     endpoint('/api/discoveries/disc-1', () => detailFixture())

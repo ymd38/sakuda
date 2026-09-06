@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyCrawledUrl,
+  crawledUrlKey,
   isApiCall,
+  normalizeCrawledEntries,
   normalizeCrawledUrls,
   spaLikelyDidNotStart,
   type CrawlScopeSite,
@@ -121,6 +123,18 @@ describe('normalizeCrawledUrls', () => {
     const { urls, dropped } = normalizeCrawledUrls(site, raw, { maxUrls: 2 })
     expect(urls).toEqual(['http://localhost:3000/p0', 'http://localhost:3000/p1'])
     expect(dropped.capped).toBe(3)
+  })
+
+  it('with a method dedupeKeyOf: a GET and a POST of the same URL both survive; get/GET collapse', () => {
+    const entries = [
+      { url: 'http://localhost:3000/x', method: 'GET' },
+      { url: 'http://localhost:3000/x', method: 'POST' },
+      { url: 'http://localhost:3000/x', method: 'get' },
+    ]
+    const { kept } = normalizeCrawledEntries(site, entries, (e) => e.url, {
+      dedupeKeyOf: (e, url) => crawledUrlKey(e.method, url),
+    })
+    expect(kept.map((k) => k.entry.method)).toEqual(['GET', 'POST'])
   })
 
   it('returns an empty list with zero drops for empty input', () => {

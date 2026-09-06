@@ -396,6 +396,55 @@ describe('runZapDiscover', () => {
     expect(out.meta.ajaxApiCallCount).toBe(0)
   })
 
+  it('keeps a GET and a POST of the same URL as two targets (method-aware dedupe)', async () => {
+    const dump = join(tmp, 'methods.jsonl')
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(
+      dump,
+      [
+        JSON.stringify({
+          method: 'GET',
+          url: 'http://localhost:3000/api/x',
+          type: 10,
+          status: 200,
+        }),
+        JSON.stringify({
+          method: 'POST',
+          url: 'http://localhost:3000/api/x',
+          type: 10,
+          status: 200,
+        }),
+        // a duplicate GET (different case) collapses into the first
+        JSON.stringify({
+          method: 'get',
+          url: 'http://localhost:3000/api/x',
+          type: 10,
+          status: 200,
+        }),
+      ].join('\n'),
+    )
+    const fakeBin = writeFakeZap(tmp, dump, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+
+    const out = await runZapDiscover({
+      discoveryId: 'disc-methods',
+      site: baseSite(),
+      workDir: join(tmp, 'work'),
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    expect(out.urls).toEqual([
+      { url: 'http://localhost:3000/api/x', method: 'GET', statusCode: 200, source: 'ajax' },
+      { url: 'http://localhost:3000/api/x', method: 'POST', statusCode: 200, source: 'ajax' },
+    ])
+  })
+
   it('warns when the crawl requested nothing at all', async () => {
     const empty = join(tmp, 'empty.jsonl')
     const { writeFileSync } = await import('node:fs')

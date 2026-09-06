@@ -1,5 +1,10 @@
 import { join } from 'node:path'
-import { isApiCall, normalizeCrawledEntries, spaLikelyDidNotStart } from '../../domain/crawledUrls'
+import {
+  crawledUrlKey,
+  isApiCall,
+  normalizeCrawledEntries,
+  spaLikelyDidNotStart,
+} from '../../domain/crawledUrls'
 import { zapScopeContext } from '../../domain/crawlScope'
 import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
@@ -122,7 +127,9 @@ export const runZapDiscover: DiscoverRunner = async ({
       run.result.oomKilled ? OOM_RUNBOOK : undefined,
     )
   const dump = parseSiteTreeDump(run.reportText)
-  const { kept, dropped } = normalizeCrawledEntries(site, dump.entries, (e) => unalias(e.url))
+  const { kept, dropped } = normalizeCrawledEntries(site, dump.entries, (e) => unalias(e.url), {
+    dedupeKeyOf: (e, url) => crawledUrlKey(e.method, url),
+  })
   const urls = kept.map(({ url, entry }) => ({
     url,
     method: entry.method,

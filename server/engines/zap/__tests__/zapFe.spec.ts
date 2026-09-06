@@ -199,6 +199,28 @@ describe('runZapFe', () => {
     expect(out.meta.targetUrlCount).toBe(1)
   })
 
+  it('requestor gets GET targets only; non-GET saved lines are counted in meta.skippedMethods', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const out = await runZapFe({
+      scanId: 'scan-skip',
+      engine: 'zap-fe',
+      site: baseSite({ nucleiPaths: '/get?q=\nPOST /api/x\nDELETE /api/y' }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    const requestor = readPlanJobs(workDir).find((j) => j.type === 'requestor')
+    expect(requestor?.requests).toEqual([{ url: 'http://localhost:3000/get?q=', method: 'GET' }])
+    expect(out.meta.skippedMethods).toEqual({ POST: 1, DELETE: 1 })
+  })
+
   it('passes the saved targets verbatim (no query seeding) on a passive run, and none when the list is empty', async () => {
     const fakeBin = writeFakeZap(tmp, FIXTURE)
     const env: Env = parseEnv({

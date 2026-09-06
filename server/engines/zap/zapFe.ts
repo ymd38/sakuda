@@ -5,7 +5,11 @@ import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeSc
 import { zapScopeContext } from '../../domain/crawlScope'
 import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
-import { zapFeHashRouteTargets, zapFeRequestTargets } from '../../domain/nucleiTargets'
+import {
+  expandNucleiTargets,
+  zapFeHashRouteTargets,
+  zapFeRequestTargets,
+} from '../../domain/nucleiTargets'
 import type { Logger } from '../../lib/logger'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildZapFePlan, planToYaml, ZAP_REPORT_JSON } from './plan'
@@ -60,6 +64,11 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   // exactly as nuclei's transient targets file does — the saved list is untouched.
   const savedTargets = zapFeRequestTargets(site).map((u) => rewriteLoopbackHost(u, alias))
   const requestUrls = activeScan ? seedEmptyQueryValues(savedTargets) : savedTargets
+  // Non-GET saved lines are not replayed yet (Epic #41): the requestor and DOM
+  // probe get GET targets only (via expandNucleiTargets). Report what was
+  // skipped so it is not silently dropped. One extra parse until PR2 folds
+  // this into a typed expansion.
+  const { skippedMethods } = expandNucleiTargets(site)
   // Hash-route targets (`/#/search?q=`) can only be tested from a real
   // browser (the fragment never reaches ZAP's proxy), and only when the site
   // opted into active checks. The probe injects into the empty query value
@@ -236,6 +245,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       ...(activeScan ? { activeScanMaxMinutes } : {}),
       targetUrlCount: requestUrls.length,
       hashRouteCount: hashRoutes.length,
+      ...(Object.keys(skippedMethods).length > 0 ? { skippedMethods } : {}),
       ...(domXssSummary
         ? { domXssProbed: domXssSummary.probed, domXssTruncated: domXssSummary.truncated }
         : {}),

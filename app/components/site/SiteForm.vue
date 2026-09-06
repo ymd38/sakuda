@@ -320,7 +320,9 @@ function handleSubmit() {
           The URLs Nuclei scans — one path per line, relative to the front base URL; prefix "api:"
           only for paths on the API base URL. Nuclei does not crawl: use "Discover URLs" on the site
           page to fill this list from ZAP's spider, or hand-list the pages and endpoints you care
-          about (top page, login, API routes with query params). "#" starts a comment.
+          about (top page, login, API routes with query params). A line may start with an HTTP
+          method, e.g. "POST /api/x" — method omitted means GET. Non-GET targets can be saved (and
+          are kept through discovery), but are not replayed yet. "#" starts a comment.
         </p>
       </div>
 
