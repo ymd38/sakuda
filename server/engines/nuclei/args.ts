@@ -59,3 +59,50 @@ export function buildNucleiArgs(i: NucleiArgsInput): string[] {
     ...headersToHeaderArgs(i.headers),
   ]
 }
+
+export interface NucleiOpenapiArgsInput {
+  /** The generated OpenAPI document, imported with `-im openapi`. */
+  openapiFile: string
+  /** DAST (fuzzing) template tree only — the OpenAPI phase is exactly the
+   * fuzzing phase, so it never loads the signature `http` tree. */
+  dastTemplatesDir: string
+  outputFile: string
+  rateLimit: number
+  concurrency: number
+  headers: Header[]
+}
+
+/**
+ * Args for the non-GET OpenAPI DAST phase (Epic #41 PR3). Unlike
+ * {@link buildNucleiArgs} it imports an OpenAPI document (`-im openapi`),
+ * loads only the DAST tree, and applies no tag filter — the DAST templates
+ * are the whole point of this phase. Same `-omit-raw` / severity / output
+ * discipline as the list phase.
+ */
+export function buildNucleiOpenapiArgs(i: NucleiOpenapiArgsInput): string[] {
+  return [
+    '-l',
+    i.openapiFile,
+    '-im',
+    'openapi',
+    '-t',
+    i.dastTemplatesDir,
+    '-dast',
+    '-severity',
+    'critical,high,medium',
+    '-rate-limit',
+    String(i.rateLimit),
+    '-c',
+    String(i.concurrency),
+    '-jsonl',
+    '-o',
+    i.outputFile,
+    '-stats-json',
+    '-si',
+    '5',
+    '-duc',
+    '-nc',
+    '-omit-raw',
+    ...headersToHeaderArgs(i.headers),
+  ]
+}

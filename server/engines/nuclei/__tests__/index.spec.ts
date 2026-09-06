@@ -256,6 +256,62 @@ describe('runNuclei', () => {
     expect(out.meta.urlCount).toBe(1)
     expect(out.meta.skippedMethods).toEqual({ POST: 1 })
   })
+
+  it('under active checks, fuzzes a non-GET-with-query via a generated OpenAPI phase, skips a queryless one, and deletes the secret docs', async () => {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'active')
+    const out = await runNuclei({
+      scanId: 'scan-openapi',
+      engine: 'nuclei',
+      site: baseSite({
+        allowMutatingRequests: true,
+        nucleiPaths: '/get?q=\nPOST /api/x?p=\nPOST /bodyless',
+      }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    // POST /api/x?p= has a query surface → one generated doc, run once.
+    expect(out.meta.openapiDocCount).toBe(1)
+    expect(out.meta.openapiDocsRun).toBe(1)
+    // POST /bodyless has no query and gets no invented body → skipped-with-reason.
+    expect(out.meta.skippedNoFuzzSeed).toEqual({ POST: 1 })
+    // active run: nothing is in the "not attempted at all" bucket.
+    expect(out.meta.skippedMethods).toBeUndefined()
+    // both phases produced a finding via the fake binary
+    expect(out.counts.high).toBe(2)
+    // the GET phase's transient targets file seeded the empty query
+    expect(readFileSync(join(workDir, 'targets.txt'), 'utf8')).toContain('/get?q=1')
+    // the generated OpenAPI doc and its outputs are removed after the run
+    expect(existsSync(join(workDir, 'openapi-0.json'))).toBe(false)
+    expect(existsSync(join(workDir, 'openapi-findings-0.jsonl'))).toBe(false)
+  })
+
+  it('under active checks with only a queryless non-GET target, there is nothing to scan', async () => {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    await expect(
+      runNuclei({
+        scanId: 'scan-empty',
+        engine: 'nuclei',
+        site: baseSite({ allowMutatingRequests: true, nucleiPaths: 'POST /bodyless' }),
+        workDir: join(tmp, 'nothing'),
+        env,
+        logger,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/nothing to scan/)
+  })
 })
 
 // Records argv next to the output file so a test can assert on the exact

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   countParameterizedUrls,
@@ -10,72 +10,92 @@ import {
   seedEmptyQueryValues,
 } from '../../domain/activeScan'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
+import { buildNonGetOpenApiDocs } from '../../domain/openapiGen'
 import { countSkippedMethods, expandNucleiTargets } from '../../domain/nucleiTargets'
-import { runCommand } from '../runCommand'
-import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
-import { buildNucleiArgs, nucleiTagsFor } from './args'
-import { normalizeNucleiLines, parseNucleiJsonl, parseNucleiStats } from './normalize'
+import type { SeverityCounts } from '#shared/types/api'
+import { emptyCounts } from '#shared/utils/severity'
+import { runCommand, type CommandResult } from '../runCommand'
+import {
+  EngineError,
+  OOM_RUNBOOK,
+  type EngineInput,
+  type EngineRunner,
+  type NewFinding,
+} from '../types'
+import { buildNucleiArgs, buildNucleiOpenapiArgs, nucleiTagsFor } from './args'
+import {
+  normalizeNucleiLines,
+  parseNucleiJsonl,
+  parseNucleiStats,
+  type NucleiStats,
+} from './normalize'
+
+/** Least a phase may run before we treat the overall deadline as spent. */
+const MIN_PHASE_MS = 30_000
+
+interface PhaseOutcome {
+  findings: NewFinding[]
+  counts: SeverityCounts
+  /** 'ok' = produced output; 'empty' = ran clean but no findings; 'failed' =
+   * non-zero exit / timeout / no output after a failure. */
+  status: 'ok' | 'empty' | 'failed'
+  result: CommandResult
+  stats: NucleiStats | null
+  invalidLines: number
+}
+
+function addCounts(into: SeverityCounts, from: SeverityCounts): void {
+  for (const k of Object.keys(into) as (keyof SeverityCounts)[]) into[k] += from[k]
+}
 
 export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
   const { targets, excluded } = expandNucleiTargets(site)
   // Hash routes (`/#/search?q=`) are SPA client routes: the fragment never
   // reaches the server, so requesting one just GETs `/`. nuclei is
-  // server-side, so it cannot test them — they are handled by the zap-fe DOM
-  // XSS probe instead (see domXssProbeScript). Drop them here, across both bases.
+  // server-side, so it cannot test them — the zap-fe DOM XSS probe handles
+  // them. Drop them here, across both bases.
   // A target's identity upstream is method+base+url, so a front line and an
   // `api:` line that resolve to the same URL (front and api may share an
   // origin) are two targets there. To nuclei they are one request: collapse
-  // on method+url so the targets file and the counts do not repeat it.
+  // on method+url so neither phase, nor the counts, repeats it.
   const replayable = uniqueBy(
     targets.filter((t) => !t.url.includes('#')),
     (t) => `${t.method}|${t.url}`,
   )
-  // nuclei's `-l` list is a URL/GET replay; non-GET saved lines are not sent
-  // yet (PR3 feeds them through a generated OpenAPI). Count them here, after
-  // the hash-route rule, so the skip reflects nuclei's own scope.
-  const urls = replayable.filter((t) => t.method === 'GET').map((t) => t.url)
-  const skippedMethods = countSkippedMethods(replayable)
-  if (urls.length === 0)
-    throw new EngineError(
-      'nuclei: no GET target URLs (nucleiPaths is empty, every path is excluded, or every saved line is a non-GET method, which is not replayed yet)',
-    )
-  const originalHost = new URL(site.frontBaseUrl).hostname
-  const targetsFile = join(workDir, 'targets.txt')
-  const outputFile = join(workDir, 'findings.jsonl')
-  // The single source of truth for "may this scan attack the target" —
-  // never decided here, only read (see domain/activeScan).
+  const getUrls = replayable.filter((t) => t.method === 'GET').map((t) => t.url)
+  const nonGet = replayable.filter((t) => t.method !== 'GET')
   const activeScan = isActiveScanEnabled(site)
-  // Risk-template groups the user opted this site into (empty unless active);
-  // each adds its templates back via -tags and lifts them from -exclude-tags.
+  const localAlias = env.localhostAlias
+
+  // Non-GET replay is gated: only an active scan may attack. When on, each
+  // non-GET target with a query surface is fuzzed via a generated OpenAPI
+  // document (PR3); one with no query has no valid fuzz seed (we never invent
+  // a body) and is counted, not sent. When off, no non-GET is replayed at all.
+  const seedOne = (u: string) => seedEmptyQueryValues([u])[0]!
+  const { docs, skippedNoFuzzSeed } = activeScan
+    ? buildNonGetOpenApiDocs(nonGet, (u) => rewriteLoopbackHost(u, localAlias), seedOne)
+    : { docs: [], skippedNoFuzzSeed: {} }
+  // skippedMethods = non-GET the run did not attempt at all. Off: every non-GET.
+  // On: none here — each non-GET is either fuzzed (docs) or in skippedNoFuzzSeed.
+  const skippedMethods = activeScan ? {} : countSkippedMethods(nonGet)
+
+  if (getUrls.length === 0 && docs.length === 0)
+    throw new EngineError(
+      'nuclei: nothing to scan (no GET target URLs, and no non-GET target with a query to fuzz under active checks)',
+    )
+
   const riskTags = effectiveRiskTags(site)
   const tags = [...nucleiTagsFor(site.headers.length > 0), ...riskExtraTags(riskTags)]
-  const parameterizedUrlCount = countParameterizedUrls(urls)
-  // Active runs seed empty query values (`?q=` → `?q=1`) so the DAST fuzzer
-  // has something to mutate; only the transient targets file changes, not
-  // the site's saved list.
-  const targetUrls = activeScan ? seedEmptyQueryValues(urls) : urls
+  const parameterizedUrlCount = countParameterizedUrls(getUrls)
   await mkdir(workDir, { recursive: true })
-  await writeFile(
-    targetsFile,
-    targetUrls.map((u) => rewriteLoopbackHost(u, env.localhostAlias)).join('\n') + '\n',
-  )
-  const args = buildNucleiArgs({
-    targetsFile,
-    templatesDir: env.nuclei.templatesDir,
-    outputFile,
-    rateLimit: site.nucleiRateLimit,
-    concurrency: 25,
-    tags,
-    headers: site.headers,
-    excludeTags: riskExcludeTags(riskTags),
-    ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
-  })
+
   logger.info(
     {
       scanId,
       engine: 'nuclei',
-      urlCount: urls.length,
+      urlCount: getUrls.length,
       excludedCount: excluded.length,
+      openapiDocCount: docs.length,
       tags,
       activeScan,
       riskTags,
@@ -85,57 +105,174 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
     },
     'nuclei start',
   )
-  const stdoutPath = join(workDir, 'stdout.log')
-  const stderrPath = join(workDir, 'stderr.log')
-  const result = await runCommand({
-    label: `nuclei:${scanId}`,
-    cmd: env.nuclei.bin,
-    args,
-    cwd: workDir,
-    stdoutPath,
-    stderrPath,
-    timeoutMs: env.nuclei.maxMinutes * 60_000,
-    signal,
-    logger,
-  })
-  if (result.aborted) throw new EngineError('nuclei aborted: server shutting down')
-  const jsonl = existsSync(outputFile) ? await readFile(outputFile, 'utf8') : ''
-  const { lines, invalidLines } = parseNucleiJsonl(jsonl)
-  if (result.code !== 0 && !result.timedOut && lines.length === 0)
-    throw new EngineError(
-      `nuclei exited with code ${result.code ?? 'null'} signal ${result.signal ?? 'none'} and produced no output; check ${stderrPath}`,
-      result.oomKilled ? OOM_RUNBOOK : undefined,
-    )
-  const { findings, counts } = normalizeNucleiLines(lines, (u) =>
-    restoreLoopbackHost(u, env.localhostAlias, originalHost),
-  )
-  const stats = parseNucleiStats(
-    (await readFile(stdoutPath, 'utf8')) + '\n' + (await readFile(stderrPath, 'utf8')),
-  )
+
+  const deadline = Date.now() + env.nuclei.maxMinutes * 60_000
+  const remaining = () => deadline - Date.now()
+  const findings: NewFinding[] = []
+  const counts = emptyCounts()
   const warnings: string[] = []
-  if (result.timedOut)
+  let anyFailed = false
+  let anyRan = false
+  let anAborted = false
+  let anOom = false
+  let timedOut = false
+  let getStats: NucleiStats | null = null
+
+  // --- phase 1: GET URL list (signature + DAST templates) -----------------
+  if (getUrls.length > 0) {
+    const targetsFile = join(workDir, 'targets.txt')
+    const outputFile = join(workDir, 'findings.jsonl')
+    const stdoutPath = join(workDir, 'stdout.log')
+    const stderrPath = join(workDir, 'stderr.log')
+    const targetUrls = activeScan ? seedEmptyQueryValues(getUrls) : getUrls
+    await writeFile(
+      targetsFile,
+      targetUrls.map((u) => rewriteLoopbackHost(u, localAlias)).join('\n') + '\n',
+    )
+    const args = buildNucleiArgs({
+      targetsFile,
+      templatesDir: env.nuclei.templatesDir,
+      outputFile,
+      rateLimit: site.nucleiRateLimit,
+      concurrency: 25,
+      tags,
+      headers: site.headers,
+      excludeTags: riskExcludeTags(riskTags),
+      ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
+    })
+    const phase = await runNucleiPhase({
+      label: `nuclei:${scanId}`,
+      cmd: env.nuclei.bin,
+      args,
+      workDir,
+      outputFile,
+      stdoutPath,
+      stderrPath,
+      timeoutMs: Math.max(remaining(), MIN_PHASE_MS),
+      signal,
+      logger,
+      unalias: (u) => restoreLoopbackHost(u, localAlias, new URL(site.frontBaseUrl).hostname),
+      readStats: true,
+    })
+    anyRan = true
+    if (phase.result.aborted) anAborted = true
+    if (phase.result.oomKilled) anOom = true
+    if (phase.result.timedOut) timedOut = true
+    if (phase.status === 'failed') {
+      anyFailed = true
+      warnings.push(
+        `nuclei GET phase failed (exit ${phase.result.code ?? 'null'}, signal ${phase.result.signal ?? 'none'}${phase.result.timedOut ? ', timed out' : ''}); see ${stderrPath}`,
+      )
+    } else {
+      findings.push(...phase.findings)
+      addCounts(counts, phase.counts)
+    }
+    getStats = phase.stats
+    if (phase.invalidLines > 0)
+      warnings.push(`${phase.invalidLines} unparsable JSONL line(s) ignored`)
+  }
+
+  // --- phase 2: non-GET via generated OpenAPI (one nuclei run per doc) -----
+  let openapiDocsRun = 0
+  for (let i = 0; i < docs.length; i++) {
+    if (anAborted) break
+    if (remaining() <= 0) {
+      warnings.push(
+        'nuclei was stopped by the engine timeout before the OpenAPI phase finished; results are partial',
+      )
+      timedOut = true
+      break
+    }
+    const d = docs[i]!
+    const docFile = join(workDir, `openapi-${i}.json`)
+    const outputFile = join(workDir, `openapi-findings-${i}.jsonl`)
+    const stdoutPath = join(workDir, `openapi-stdout-${i}.log`)
+    const stderrPath = join(workDir, `openapi-stderr-${i}.log`)
+    try {
+      // Secret-artifact discipline: the doc carries the site's query values,
+      // and the outputs may echo them; write everything 0600 and pre-create
+      // the tool-written outputs so nuclei does not create them under the
+      // process umask. All four are removed in `finally`.
+      await writeFile(docFile, JSON.stringify(d.doc), { mode: 0o600 })
+      for (const p of [outputFile, stdoutPath, stderrPath]) await writeFile(p, '', { mode: 0o600 })
+      const args = buildNucleiOpenapiArgs({
+        openapiFile: docFile,
+        dastTemplatesDir: env.nuclei.dastTemplatesDir,
+        outputFile,
+        rateLimit: site.nucleiRateLimit,
+        concurrency: 25,
+        headers: site.headers,
+      })
+      const phase = await runNucleiPhase({
+        label: `nuclei-openapi:${scanId}:${i}`,
+        cmd: env.nuclei.bin,
+        args,
+        workDir,
+        outputFile,
+        stdoutPath,
+        stderrPath,
+        timeoutMs: Math.max(remaining(), MIN_PHASE_MS),
+        signal,
+        logger,
+        unalias: (u) => restoreLoopbackHost(u, localAlias, d.originalHost),
+        readStats: false,
+      })
+      anyRan = true
+      openapiDocsRun++
+      if (phase.result.aborted) anAborted = true
+      if (phase.result.oomKilled) anOom = true
+      if (phase.result.timedOut) timedOut = true
+      if (phase.status === 'failed') {
+        anyFailed = true
+        warnings.push(
+          `nuclei OpenAPI phase failed for one origin (exit ${phase.result.code ?? 'null'}, signal ${phase.result.signal ?? 'none'}${phase.result.timedOut ? ', timed out' : ''})`,
+        )
+      } else {
+        findings.push(...phase.findings)
+        addCounts(counts, phase.counts)
+      }
+    } finally {
+      for (const p of [docFile, outputFile, stdoutPath, stderrPath]) await rm(p, { force: true })
+    }
+  }
+
+  if (anAborted) throw new EngineError('nuclei aborted: server shutting down')
+  // Every attempted phase failed and nothing was produced → a real failure.
+  if (anyRan && anyFailed && sum(counts) === 0)
+    throw new EngineError(
+      'nuclei produced no output; every phase failed — see the per-phase logs in the work dir',
+      anOom ? OOM_RUNBOOK : undefined,
+    )
+
+  if (timedOut)
     warnings.push(`nuclei was stopped after ${env.nuclei.maxMinutes} min; results are partial`)
-  const req = Number(stats?.requests ?? 0)
-  const errs = Number(stats?.errors ?? 0)
+  const req = Number(getStats?.requests ?? 0)
+  const errs = Number(getStats?.errors ?? 0)
   if (req > 0 && errs / req > 0.05)
     warnings.push(
       `error rate ${((errs / req) * 100).toFixed(1)}% (${errs}/${req}); coverage may be reduced — lower nucleiRateLimit`,
     )
-  if (invalidLines > 0) warnings.push(`${invalidLines} unparsable JSONL line(s) ignored`)
-  if (activeScan && parameterizedUrlCount === 0)
+  // The "nothing to fuzz" warning should account for the OpenAPI phase too:
+  // an emitted non-GET op is a fuzz target even when no GET URL is parameterized.
+  if (activeScan && parameterizedUrlCount === 0 && openapiDocsRun === 0)
     warnings.push(
       'active injection checks are on but no saved target has query parameters, so the DAST templates had nothing to fuzz — add parameterized paths (e.g. /search?q=) to the target list',
     )
+
   return {
     findings,
     counts,
     warnings,
-    exitCode: result.code,
-    signal: result.signal,
+    // Non-zero when any attempted phase failed, so the run is not reported as
+    // a clean exit; the scan is still stored `done`, hence the warnings/meta.
+    exitCode: anyFailed ? 1 : 0,
+    signal: null,
     meta: {
-      urlCount: urls.length,
+      urlCount: getUrls.length,
       excludedUrls: excluded,
       ...(Object.keys(skippedMethods).length > 0 ? { skippedMethods } : {}),
+      ...(Object.keys(skippedNoFuzzSeed).length > 0 ? { skippedNoFuzzSeed } : {}),
+      ...(docs.length > 0 ? { openapiDocCount: docs.length, openapiDocsRun } : {}),
       tags,
       rateLimit: site.nucleiRateLimit,
       concurrency: 25,
@@ -144,9 +281,8 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       riskTags,
       ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
       parameterizedUrlCount,
-      stats,
-      durationSec: Math.round(result.durationMs / 1000),
-      timedOut: result.timedOut,
+      stats: getStats,
+      timedOut,
     },
   }
 }
@@ -160,4 +296,60 @@ function uniqueBy<T>(items: T[], keyOf: (item: T) => string): T[] {
     seen.add(key)
     return true
   })
+}
+
+function sum(c: SeverityCounts): number {
+  return c.critical + c.high + c.medium + c.low + c.info
+}
+
+interface PhaseInput {
+  label: string
+  cmd: string
+  args: string[]
+  workDir: string
+  outputFile: string
+  stdoutPath: string
+  stderrPath: string
+  timeoutMs: number
+  signal: AbortSignal
+  logger: EngineInput['logger']
+  unalias: (u: string) => string
+  readStats: boolean
+}
+
+/** Runs one nuclei invocation and normalizes its JSONL output. Never throws
+ * for an ordinary process failure — the caller decides how a failed phase
+ * affects the whole run — but propagates nothing it swallows: an aborted or
+ * OOM run is reflected in `result`. */
+async function runNucleiPhase(i: PhaseInput): Promise<PhaseOutcome> {
+  const result = await runCommand({
+    label: i.label,
+    cmd: i.cmd,
+    args: i.args,
+    cwd: i.workDir,
+    stdoutPath: i.stdoutPath,
+    stderrPath: i.stderrPath,
+    timeoutMs: i.timeoutMs,
+    signal: i.signal,
+    logger: i.logger,
+  })
+  const jsonl = existsSync(i.outputFile) ? await readFile(i.outputFile, 'utf8') : ''
+  const { lines, invalidLines } = parseNucleiJsonl(jsonl)
+  const stats = i.readStats
+    ? parseNucleiStats(
+        (existsSync(i.stdoutPath) ? await readFile(i.stdoutPath, 'utf8') : '') +
+          '\n' +
+          (existsSync(i.stderrPath) ? await readFile(i.stderrPath, 'utf8') : ''),
+      )
+    : null
+  const failed = result.aborted || (result.code !== 0 && !result.timedOut && lines.length === 0)
+  const { findings, counts } = normalizeNucleiLines(lines, i.unalias)
+  return {
+    findings,
+    counts,
+    status: failed ? 'failed' : lines.length > 0 ? 'ok' : 'empty',
+    result,
+    stats,
+    invalidLines,
+  }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildNucleiArgs, NUCLEI_BASE_TAGS, nucleiTagsFor } from '../args'
+import { buildNucleiArgs, buildNucleiOpenapiArgs, NUCLEI_BASE_TAGS, nucleiTagsFor } from '../args'
 
 describe('nucleiTagsFor', () => {
   it('returns the base tags when unauthenticated', () => {
@@ -95,6 +95,40 @@ describe('buildNucleiArgs with active checks (dastTemplatesDir)', () => {
     expect(buildNucleiArgs({ ...base, dastTemplatesDir: undefined })).toEqual(buildNucleiArgs(base))
     expect(buildNucleiArgs(base)).not.toContain('-dast')
     expect(buildNucleiArgs(base).filter((a) => a === '-t')).toHaveLength(1)
+  })
+})
+
+describe('buildNucleiOpenapiArgs', () => {
+  const base = {
+    openapiFile: '/w/openapi-0.json',
+    dastTemplatesDir: '/tpl/dast',
+    outputFile: '/w/openapi-findings-0.jsonl',
+    rateLimit: 50,
+    concurrency: 25,
+    headers: [{ name: 'Cookie', value: 'a=b' }],
+  }
+
+  it('imports the OpenAPI doc, loads only the DAST tree, no tag filter, -omit-raw kept', () => {
+    const args = buildNucleiOpenapiArgs(base)
+    expect(args.slice(0, 7)).toEqual([
+      '-l',
+      '/w/openapi-0.json',
+      '-im',
+      'openapi',
+      '-t',
+      '/tpl/dast',
+      '-dast',
+    ])
+    // exactly one -t (the DAST tree), no signature http tree, no -tags/-exclude-tags
+    expect(args.filter((a) => a === '-t')).toHaveLength(1)
+    expect(args).not.toContain('-tags')
+    expect(args).not.toContain('-exclude-tags')
+    expect(args).toContain('-omit-raw')
+    expect(args.slice(-2)).toEqual(['-H', 'Cookie: a=b'])
+    expect(args.slice(args.indexOf('-severity'), args.indexOf('-severity') + 2)).toEqual([
+      '-severity',
+      'critical,high,medium',
+    ])
   })
 })
 
