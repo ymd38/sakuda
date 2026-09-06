@@ -221,6 +221,62 @@ describe('runZapFe', () => {
     expect(out.meta.skippedMethods).toEqual({ POST: 1, DELETE: 1 })
   })
 
+  it('under active checks, the requestor sends non-GET with its own method (seeded), nothing skipped', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const out = await runZapFe({
+      scanId: 'scan-active-req',
+      engine: 'zap-fe',
+      site: baseSite({
+        allowMutatingRequests: true,
+        nucleiPaths: '/get?q=\nPOST /api/x?p=\nDELETE /api/y',
+      }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    const requestor = readPlanJobs(workDir).find((j) => j.type === 'requestor')
+    // GET + POST (empty query seeded) + DELETE, each with its own method
+    expect(requestor?.requests).toEqual([
+      { url: 'http://localhost:3000/get?q=1', method: 'GET' },
+      { url: 'http://localhost:3000/api/x?p=1', method: 'POST' },
+      { url: 'http://localhost:3000/api/y', method: 'DELETE' },
+    ])
+    expect(out.meta.skippedMethods).toBeUndefined()
+    // the spider submits forms as POST only under active checks
+    const spider = readPlanJobs(workDir).find((j) => j.type === 'spider')
+    expect(spider?.parameters.postForm).toBe(true)
+  })
+
+  it('sends a mutating request once when query seeding makes two saved lines the same request', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const out = await runZapFe({
+      scanId: 'scan-seed-collision',
+      engine: 'zap-fe',
+      // distinct saved lines; under active checks `?q=` is seeded to `?q=1`
+      site: baseSite({ allowMutatingRequests: true, nucleiPaths: 'POST /s?q=\nPOST /s?q=1' }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    const requestor = readPlanJobs(workDir).find((j) => j.type === 'requestor')
+    expect(requestor?.requests).toEqual([{ url: 'http://localhost:3000/s?q=1', method: 'POST' }])
+    expect(out.meta.targetUrlCount).toBe(1)
+  })
+
   it('passes the saved targets verbatim (no query seeding) on a passive run, and none when the list is empty', async () => {
     const fakeBin = writeFakeZap(tmp, FIXTURE)
     const env: Env = parseEnv({

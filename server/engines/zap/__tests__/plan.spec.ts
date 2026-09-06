@@ -34,7 +34,9 @@ describe('buildZapFePlan', () => {
         { type: 'passiveScan-config', parameters: { enableTags: false, maxAlertsPerRule: 10 } },
         {
           type: 'spider',
-          parameters: { context: 'sakuda', url: 'http://h:3000/', maxDuration: 5 },
+          // postForm pinned off (default plan = no active checks): the AF
+          // spider would otherwise submit forms as POST by default.
+          parameters: { context: 'sakuda', url: 'http://h:3000/', maxDuration: 5, postForm: false },
         },
         {
           type: 'spiderAjax',
@@ -105,8 +107,33 @@ describe('buildZapFePlan', () => {
     })
     expect(on[3]).not.toHaveProperty('policyDefinition')
 
-    // Off: the plan is exactly the default one, job for job.
-    expect(jobsOf(buildZapFePlan(base))).toEqual(on.filter((j) => j.type !== 'activeScan'))
+    // Off: the same jobs minus the activeScan job (the spider's postForm also
+    // flips off — asserted in the postForm test below).
+    expect(jobsOf(buildZapFePlan(base)).map((j) => j.type)).toEqual(
+      on.filter((j) => j.type !== 'activeScan').map((j) => j.type),
+    )
+  })
+
+  it('gates spider form submission (postForm) on active checks', () => {
+    const base = {
+      context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
+      seedUrl: 'http://h:3000/',
+      spiderMaxMinutes: 5,
+      ajaxMaxMinutes: 5,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    }
+    const spiderOf = (plan: Record<string, unknown>) =>
+      (plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>).find(
+        (j) => j.type === 'spider',
+      )
+    // Passive: postForm off (the AF spider would POST forms by default).
+    expect(spiderOf(buildZapFePlan(base))?.parameters.postForm).toBe(false)
+    // Active: postForm on so forms are submitted as POST.
+    expect(
+      spiderOf(buildZapFePlan({ ...base, activeScan: { maxScanMinutes: 45 } }))?.parameters
+        .postForm,
+    ).toBe(true)
   })
 
   it('requests the saved targets (GET) after the Ajax spider and before the active scan', () => {
@@ -125,7 +152,10 @@ describe('buildZapFePlan', () => {
     const withTargets = jobsOf(
       buildZapFePlan({
         ...base,
-        requestUrls: ['http://h:3000/search?q=1', 'http://h:3000/greet?name=1'],
+        requestTargets: [
+          { url: 'http://h:3000/search?q=1', method: 'GET' },
+          { url: 'http://h:3000/create', method: 'POST' },
+        ],
         activeScan: { maxScanMinutes: 45 },
       }),
     )
@@ -139,13 +169,13 @@ describe('buildZapFePlan', () => {
       'report',
       'report',
     ])
-    // `requests` is a sibling of `parameters` in the AF requestor job.
+    // `requests` is a sibling of `parameters`; each carries its own method.
     expect(withTargets[3]).toEqual({
       type: 'requestor',
       parameters: {},
       requests: [
         { url: 'http://h:3000/search?q=1', method: 'GET' },
-        { url: 'http://h:3000/greet?name=1', method: 'GET' },
+        { url: 'http://h:3000/create', method: 'POST' },
       ],
     })
 
@@ -153,7 +183,7 @@ describe('buildZapFePlan', () => {
     const without = withTargets.filter((j) => j.type !== 'requestor')
     expect(jobsOf(buildZapFePlan({ ...base, activeScan: { maxScanMinutes: 45 } }))).toEqual(without)
     expect(
-      jobsOf(buildZapFePlan({ ...base, requestUrls: [], activeScan: { maxScanMinutes: 45 } })),
+      jobsOf(buildZapFePlan({ ...base, requestTargets: [], activeScan: { maxScanMinutes: 45 } })),
     ).toEqual(without)
   })
 
@@ -178,7 +208,7 @@ describe('buildZapFePlan', () => {
       buildZapFePlan({
         ...base,
         siteTreeDump: dump,
-        requestUrls: ['http://h:3000/search?q=1'],
+        requestTargets: [{ url: 'http://h:3000/search?q=1', method: 'GET' }],
         activeScan: { maxScanMinutes: 45 },
       }),
     )
@@ -212,7 +242,7 @@ describe('buildZapFePlan', () => {
       jobsOf(
         buildZapFePlan({
           ...base,
-          requestUrls: ['http://h:3000/search?q=1'],
+          requestTargets: [{ url: 'http://h:3000/search?q=1', method: 'GET' }],
           activeScan: { maxScanMinutes: 45 },
         }),
       ),

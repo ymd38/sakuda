@@ -96,11 +96,13 @@ describe('zapFeRequestTargets / zapFeHashRouteTargets (over the expanded result)
     expect(zapFeHashRouteTargets(expand('# only a comment'))).toEqual([])
   })
 
-  it('keep front-base GET targets only: no api: lines, no non-GET, split on the fragment', () => {
+  it('return front-base non-hash targets with their method (api: lines and hash routes excluded); the caller gates non-GET', () => {
     const e = expand('/\n/search?q=\napi:/v1/users\nPOST /mut\n/#/search?q=\n/greet?name=a#top')
+    // every front-base non-hash target, method included — GET and the POST
     expect(zapFeRequestTargets(e)).toEqual([
-      'http://localhost:3000/',
-      'http://localhost:3000/search?q=',
+      { method: 'GET', url: 'http://localhost:3000/' },
+      { method: 'GET', url: 'http://localhost:3000/search?q=' },
+      { method: 'POST', url: 'http://localhost:3000/mut' },
     ])
     // any front-base GET URL carrying a fragment is a hash route
     expect(zapFeHashRouteTargets(e)).toEqual([
@@ -111,7 +113,9 @@ describe('zapFeRequestTargets / zapFeHashRouteTargets (over the expanded result)
 
   it('apply the exclude paths the same way as nuclei', () => {
     expect(zapFeRequestTargets(expand('', '/login'))).toEqual([])
-    expect(zapFeRequestTargets(expand('/\n/login', '/login'))).toEqual(['http://localhost:3000/'])
+    expect(zapFeRequestTargets(expand('/\n/login', '/login'))).toEqual([
+      { method: 'GET', url: 'http://localhost:3000/' },
+    ])
   })
 
   it('drop api: hash lines (they resolve to the API base, not the front)', () => {

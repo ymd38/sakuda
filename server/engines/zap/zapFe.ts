@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeScan'
+import { isActiveScanEnabled, isSafeMethod, seedEmptyQueryValues } from '../../domain/activeScan'
 import { zapScopeContext } from '../../domain/crawlScope'
 import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
@@ -60,18 +60,38 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   // site's ZAP API limit: it is the one active-scan budget the site defines.
   const activeScan = isActiveScanEnabled(site)
   const activeScanMaxMinutes = activeScan ? site.zapApiMaxMinutes : 0
+  const seedOne = (u: string) => seedEmptyQueryValues([u])[0]!
   // Expand the saved targets once; the requestor, the DOM probe and the skip
   // telemetry all read this one result.
   const expanded = expandNucleiTargets(site)
-  // Saved targets the spiders may never reach get requested up front so the
-  // scans see them; an active run seeds empty query values (`?q=` → `?q=1`)
-  // exactly as nuclei's transient targets file does — the saved list is untouched.
-  const savedTargets = zapFeRequestTargets(expanded).map((u) => rewriteLoopbackHost(u, alias))
-  const requestUrls = activeScan ? seedEmptyQueryValues(savedTargets) : savedTargets
-  // Non-GET saved lines are not replayed yet (Epic #41): the requestor sends
-  // GET only (PR4 will send them as structured requests). Count the front-base
-  // non-GET targets — the requestor's scope — so they are not silently dropped.
-  const skippedMethods = countSkippedMethods(expanded.targets.filter((t) => t.base === 'front'))
+  // Saved front-base targets the spiders may never reach get requested up
+  // front (with their own method) so the scans see them. A safe method
+  // (GET/HEAD/OPTIONS) is always requested; a mutating one only under active
+  // checks (`isActiveScanEnabled`), so a passive run stays read-only. An
+  // active run seeds empty query values (`?q=` → `?q=1`) exactly as nuclei's
+  // transient targets file does — the saved list is untouched.
+  const frontTargets = zapFeRequestTargets(expanded)
+  const dispatched = frontTargets.filter((t) => isSafeMethod(t.method) || activeScan)
+  // Seeding can make two distinct saved lines the same request (`/s?q=` and
+  // `/s?q=1`); a mutating request must not be sent twice for that, so the
+  // requestor list is keyed on method + final URL.
+  const requestTargets = [
+    ...new Map(
+      dispatched.map((t) => {
+        const url = rewriteLoopbackHost(activeScan ? seedOne(t.url) : t.url, alias)
+        return [`${t.method} ${url}`, { method: t.method, url }] as const
+      }),
+    ).values(),
+  ]
+  // skippedMethods = front-base non-GET targets the requestor did not send:
+  // mutating ones on a passive run, plus any non-GET hash route (the DOM probe
+  // is GET-only, so a non-GET hash route reaches no engine). Counts only.
+  const dispatchedKeys = new Set(dispatched.map((t) => `${t.method} ${t.url}`))
+  const skippedMethods = countSkippedMethods(
+    expanded.targets.filter(
+      (t) => t.base === 'front' && !dispatchedKeys.has(`${t.method} ${t.url}`),
+    ),
+  )
   // Hash-route targets (`/#/search?q=`) can only be tested from a real
   // browser (the fragment never reaches ZAP's proxy), and only when the site
   // opted into active checks. The probe injects into the empty query value
@@ -111,7 +131,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     ajaxMaxMinutes: site.zapFeSpiderMaxMinutes,
     passiveMaxMinutes,
     ...(activeScan ? { activeScan: { maxScanMinutes: activeScanMaxMinutes } } : {}),
-    requestUrls,
+    requestTargets,
     ...(runDomXssProbe
       ? {
           domXssProbe: {
@@ -138,7 +158,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       activeScan,
       activeScanMaxMinutes,
-      targetUrlCount: requestUrls.length,
+      targetUrlCount: requestTargets.length,
       hashRouteCount: hashRoutes.length,
       headerNames: site.headerNames,
       browserStorageNames: site.browserStorageNames,
@@ -246,7 +266,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       activeScan,
       ...(activeScan ? { activeScanMaxMinutes } : {}),
-      targetUrlCount: requestUrls.length,
+      targetUrlCount: requestTargets.length,
       hashRouteCount: hashRoutes.length,
       ...(Object.keys(skippedMethods).length > 0 ? { skippedMethods } : {}),
       ...(domXssSummary

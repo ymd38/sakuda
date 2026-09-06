@@ -27,10 +27,12 @@ export interface ZapFePlanInput {
    * `domain/activeScan`): adds an `activeScan` job after the crawl so ZAP's
    * XSS rules (reflected / DOM) run against what the spiders found. */
   activeScan?: { maxScanMinutes: number }
-  /** Saved targets to GET once the spiders are done (AF `requestor`), so
-   * URLs the crawl never reached still sit in the site tree for the passive
-   * and active scans. Empty or absent → no requestor job. */
-  requestUrls?: string[]
+  /** Saved targets to request once the spiders are done (AF `requestor`),
+   * each with its method, so URLs the crawl never reached still sit in the
+   * site tree for the passive and active scans. Non-GET entries are included
+   * by the caller only under active checks. Empty or absent → no requestor
+   * job. */
+  requestTargets?: ZapRequestTarget[]
   /** Standalone DOM XSS probe script (see `domXssProbeScript`) for SPA hash
    * routes, run after the active scan. Absent → no probe jobs. */
   domXssProbe?: ZapStandaloneScript
@@ -124,12 +126,21 @@ const standaloneScriptJobs = (s: ZapStandaloneScript) => [
   { type: 'script', parameters: { action: 'run', type: 'standalone', name: s.name } },
 ]
 
-/** GET each URL once. `requests` is a sibling of `parameters` in the AF
- * requestor job, like `policyDefinition` for activeScan. */
-const requestorJob = (urls: string[]) => ({
+/** A saved target to request into the site tree, with its HTTP method. No
+ * body: discovery captures none and none is invented (Epic #41 PR3/PR4). */
+export interface ZapRequestTarget {
+  url: string
+  method: string
+}
+
+/** Requests each target once with its own method — the caller only includes a
+ * mutating method when the site opted into active checks. `requests` is a
+ * sibling of `parameters` in the AF requestor job, like `policyDefinition`
+ * for activeScan. */
+const requestorJob = (requests: ZapRequestTarget[]) => ({
   type: 'requestor',
   parameters: {},
-  requests: urls.map((url) => ({ url, method: 'GET' })),
+  requests: requests.map((r) => ({ url: r.url, method: r.method })),
 })
 
 /** AF `policyDefinition` for an activeScan job — a sibling of `parameters`,
@@ -195,11 +206,21 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
       ...browserScriptJobs(i.browserScript),
       {
         type: 'spider',
-        parameters: { context: i.context.name, url: i.seedUrl, maxDuration: i.spiderMaxMinutes },
+        parameters: {
+          context: i.context.name,
+          url: i.seedUrl,
+          maxDuration: i.spiderMaxMinutes,
+          // ZAP's AF spider defaults postForm/processForm to true — i.e. it
+          // submits forms as POST by default. That is a mutating action, so
+          // it is pinned to the active-checks opt-in here (a passive run must
+          // stay read-only). processForm (filling fields, incl. GET forms)
+          // keeps its default so GET forms are still discovered.
+          postForm: Boolean(i.activeScan),
+        },
       },
       ajaxSpiderJob(i.context.name, i.seedUrl, i.ajaxMaxMinutes),
       ...(i.siteTreeDump ? standaloneScriptJobs(i.siteTreeDump) : []),
-      ...(i.requestUrls?.length ? [requestorJob(i.requestUrls)] : []),
+      ...(i.requestTargets?.length ? [requestorJob(i.requestTargets)] : []),
       ...(i.activeScan
         ? [activeScanJob(i.context.name, i.activeScan.maxScanMinutes, FE_ACTIVE_SCAN_PARAMS)]
         : []),

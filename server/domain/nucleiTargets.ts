@@ -97,16 +97,19 @@ export function expandNucleiTargets(site: NucleiTargetSite): ExpandedNucleiTarge
  * exclusion as nuclei (one source of truth), narrowed to what the FE plan
  * can act on: front-base targets only (`api:` lines belong to zap-api's
  * context — scoped by `base`, not origin, since front and api may share
- * one), GET only (non-GET replay is PR4), and no hash routes — the fragment
- * never reaches the server, so requesting `/#/search?q=` is just another GET
- * of `/` (their DOM probing is a separate concern). No saved lines → no
- * requestor job at all: the root fallback nuclei uses is already the seed.
+ * one) and no hash routes — the fragment never reaches the server, so
+ * requesting `/#/search?q=` is just another GET of `/` (their DOM probing is
+ * a separate concern). Every method is returned with its target; the caller
+ * decides which to actually request (GET/HEAD/OPTIONS always, mutating ones
+ * only under active checks — see zapFe). No saved lines → none.
  */
-export function zapFeRequestTargets(expanded: ExpandedNucleiTargets): string[] {
+export function zapFeRequestTargets(
+  expanded: ExpandedNucleiTargets,
+): Array<{ method: TargetMethod; url: string }> {
   if (!expanded.configured) return []
   return expanded.targets
-    .filter((t) => t.base === 'front' && t.method === 'GET' && !t.url.includes('#'))
-    .map((t) => t.url)
+    .filter((t) => t.base === 'front' && !t.url.includes('#'))
+    .map((t) => ({ method: t.method, url: t.url }))
 }
 
 /**
