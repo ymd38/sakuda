@@ -10,13 +10,17 @@ import { join } from 'node:path'
  * asserted by the caller), and copies `fixturePath` to `report.json` unless
  * `FAKE_ZAP_NO_REPORT=1` is set in the test process's env (inherited by the
  * spawned child). `outputFile` lets discovery specs have it produce the
- * site-tree dump instead of a report.
+ * site-tree dump instead of a report; `extraOutputs` (output file name →
+ * fixture path) adds more files, e.g. the site-tree dump next to zap-fe's
+ * report. `FAKE_ZAP_STDERR`, when set, is written to stderr verbatim so a
+ * spec can replay ZAP's own failure lines.
  */
 export function writeFakeZap(
   dir: string,
   fixturePath: string,
   name = 'fake-zap.js',
   outputFile = 'report.json',
+  extraOutputs: Record<string, string> = {},
 ): string {
   const script = `#!/usr/bin/env node
 const fs = require('node:fs')
@@ -47,6 +51,10 @@ if (fs.existsSync(secretFile)) {
 if (process.env.FAKE_ZAP_NO_REPORT !== '1') {
   fs.copyFileSync(${JSON.stringify(fixturePath)}, path.join(hostWorkDir, ${JSON.stringify(outputFile)}))
 }
+for (const [file, fixture] of Object.entries(${JSON.stringify(extraOutputs)})) {
+  fs.copyFileSync(fixture, path.join(hostWorkDir, file))
+}
+if (process.env.FAKE_ZAP_STDERR) process.stderr.write(process.env.FAKE_ZAP_STDERR)
 process.exit(0)
 `
   const p = join(dir, name)

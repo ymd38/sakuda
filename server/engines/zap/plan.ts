@@ -34,6 +34,11 @@ export interface ZapFePlanInput {
   /** Standalone DOM XSS probe script (see `domXssProbeScript`) for SPA hash
    * routes, run after the active scan. Absent → no probe jobs. */
   domXssProbe?: ZapStandaloneScript
+  /** Site-tree dump script (see `siteTreeDump`), run right after the two
+   * spiders — before the requestor, active scan and probe add their own
+   * traffic — so the dump is exactly what the spiders reached. Absent → no
+   * dump jobs. */
+  siteTreeDump?: ZapStandaloneScript
   reportDir: string
 }
 
@@ -193,6 +198,7 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
         parameters: { context: i.context.name, url: i.seedUrl, maxDuration: i.spiderMaxMinutes },
       },
       ajaxSpiderJob(i.context.name, i.seedUrl, i.ajaxMaxMinutes),
+      ...(i.siteTreeDump ? standaloneScriptJobs(i.siteTreeDump) : []),
       ...(i.requestUrls?.length ? [requestorJob(i.requestUrls)] : []),
       ...(i.activeScan
         ? [activeScanJob(i.context.name, i.activeScan.maxScanMinutes, FE_ACTIVE_SCAN_PARAMS)]

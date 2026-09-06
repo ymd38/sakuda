@@ -157,6 +157,68 @@ describe('buildZapFePlan', () => {
     ).toEqual(without)
   })
 
+  it('runs the site-tree dump script (add + run) right after the spiders, before the requestor', () => {
+    const base = {
+      context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
+      seedUrl: 'http://h:3000/',
+      spiderMaxMinutes: 5,
+      ajaxMaxMinutes: 5,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    }
+    const jobsOf = (plan: Record<string, unknown>) =>
+      plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>
+    const dump = {
+      file: '/zap/wrk/dump-site-tree.js',
+      name: 'sakuda-dump-site-tree',
+      engine: 'ECMAScript : Graal.js',
+    }
+
+    const withDump = jobsOf(
+      buildZapFePlan({
+        ...base,
+        siteTreeDump: dump,
+        requestUrls: ['http://h:3000/search?q=1'],
+        activeScan: { maxScanMinutes: 45 },
+      }),
+    )
+    expect(withDump.map((j) => j.type)).toEqual([
+      'passiveScan-config',
+      'spider',
+      'spiderAjax',
+      'script',
+      'script',
+      'requestor',
+      'activeScan',
+      'passiveScan-wait',
+      'report',
+      'report',
+    ])
+    expect(withDump[3]?.parameters).toEqual({
+      action: 'add',
+      type: 'standalone',
+      engine: 'ECMAScript : Graal.js',
+      name: 'sakuda-dump-site-tree',
+      file: '/zap/wrk/dump-site-tree.js',
+    })
+    expect(withDump[4]?.parameters).toEqual({
+      action: 'run',
+      type: 'standalone',
+      name: 'sakuda-dump-site-tree',
+    })
+
+    // Absent: the plan is the one without the two script jobs, job for job.
+    expect(
+      jobsOf(
+        buildZapFePlan({
+          ...base,
+          requestUrls: ['http://h:3000/search?q=1'],
+          activeScan: { maxScanMinutes: 45 },
+        }),
+      ),
+    ).toEqual(withDump.filter((j) => j.type !== 'script'))
+  })
+
   it('adds the DOM XSS probe script (add + run) after the active scan when domXssProbe is set', () => {
     const base = {
       context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },

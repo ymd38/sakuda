@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
@@ -131,16 +131,19 @@ describe('runZapFe', () => {
     })
 
     const jobs = readPlanJobs(workDir)
+    // the two `script` jobs are the site-tree dump (add + run) right after the spiders
     expect(jobs.map((j) => j.type)).toEqual([
       'passiveScan-config',
       'spider',
       'spiderAjax',
+      'script',
+      'script',
       'activeScan',
       'passiveScan-wait',
       'report',
       'report',
     ])
-    expect(jobs[3]?.parameters.maxScanDurationInMins).toBe(30)
+    expect(jobs[5]?.parameters.maxScanDurationInMins).toBe(30)
     expect(out.meta.activeScan).toBe(true)
     expect(out.meta.activeScanMaxMinutes).toBe(30)
   })
@@ -172,11 +175,14 @@ describe('runZapFe', () => {
     })
 
     const jobs = readPlanJobs(workDir)
-    // the `/#/search?q=` hash route also drives the DOM XSS probe (script add + run)
+    // site-tree dump (script add + run) after the spiders; the `/#/search?q=`
+    // hash route also drives the DOM XSS probe (script add + run) after the active scan
     expect(jobs.map((j) => j.type)).toEqual([
       'passiveScan-config',
       'spider',
       'spiderAjax',
+      'script',
+      'script',
       'requestor',
       'activeScan',
       'script',
@@ -186,7 +192,7 @@ describe('runZapFe', () => {
       'report',
     ])
     // active run: the empty query value is seeded like nuclei's targets file
-    expect(jobs[3]?.requests).toEqual([
+    expect(jobs[5]?.requests).toEqual([
       { url: 'http://host.docker.internal:3000/search?q=1', method: 'GET' },
     ])
     expect(out.meta.targetUrlCount).toBe(1)
@@ -242,10 +248,13 @@ describe('runZapFe', () => {
         signal: new AbortController().signal,
       })
 
-    // opted in: two script jobs after the active scan, the probe script written
+    // opted in: two probe script jobs after the active scan, the probe script written
+    const probeJobsOf = (workDir: string) =>
+      readPlanJobs(workDir).filter(
+        (j) => j.type === 'script' && j.parameters.name === 'sakuda-dom-xss-probe',
+      )
     const on = await run(join(tmp, 'on'), true)
-    const onJobs = readPlanJobs(join(tmp, 'on'))
-    const scriptJobs = onJobs.filter((j) => j.type === 'script')
+    const scriptJobs = probeJobsOf(join(tmp, 'on'))
     expect(scriptJobs.map((j) => j.parameters.action)).toEqual(['add', 'run'])
     const addJob = scriptJobs[0]!
     expect(addJob.parameters.type).toBe('standalone')
@@ -259,7 +268,7 @@ describe('runZapFe', () => {
 
     // opted out: no probe job at all
     const off = await run(join(tmp, 'off'), false)
-    expect(readPlanJobs(join(tmp, 'off')).some((j) => j.type === 'script')).toBe(false)
+    expect(probeJobsOf(join(tmp, 'off'))).toEqual([])
     expect(off.meta.hashRouteCount).toBe(0)
   })
 
@@ -343,36 +352,103 @@ describe('runZapFe', () => {
     expect(argv).not.toContain('-config')
   })
 
-  it('adds the seed-path warning when zapFeSeedPath was not among reached URLs', async () => {
-    const fakeBin = writeFakeZap(tmp, FIXTURE)
-    const env: Env = parseEnv({
-      SAKUDA_ENCRYPTION_KEY: key,
-      SAKUDA_ZAP_CMD: fakeBin,
-      SAKUDA_DATA_DIR: tmp,
-      SAKUDA_LOCALHOST_ALIAS: 'host.docker.internal',
-    })
-    const workDir = join(tmp, 'work')
-    const site = baseSite({
-      headers: [{ name: 'Cookie', value: 'a=b' }],
-      headerNames: ['Cookie'],
-      browserStorageNames: [],
-      zapFeSeedPath: '/dash',
-      discoverySeedPaths: '',
+  describe('seed reachability (site-tree dump + spider access failures, never the alerts)', () => {
+    // Fixture site tree: the spiders crawled `/`, `/api/...`, `/rest/...`, `/admin/config` — no `/dash`.
+    const SITE_TREE = join(__dirname, 'fixtures', 'site-tree.jsonl')
+    const withHeaders = (seed: string) =>
+      baseSite({
+        headers: [{ name: 'Cookie', value: 'a=b' }],
+        headerNames: ['Cookie'],
+        zapFeSeedPath: seed,
+      })
+    const runWith = (site: SiteWithHeaders, workDir: string, dump = SITE_TREE) => {
+      const fakeBin = writeFakeZap(tmp, FIXTURE, 'fake-zap.js', 'report.json', {
+        'site-tree.jsonl': dump,
+      })
+      const env: Env = parseEnv({
+        SAKUDA_ENCRYPTION_KEY: key,
+        SAKUDA_ZAP_CMD: fakeBin,
+        SAKUDA_DATA_DIR: tmp,
+        SAKUDA_LOCALHOST_ALIAS: 'host.docker.internal',
+      })
+      return runZapFe({
+        scanId: 'scan-2',
+        engine: 'zap-fe',
+        site,
+        workDir,
+        env,
+        logger,
+        signal: new AbortController().signal,
+      })
+    }
+    const seedWarning = (out: { warnings: string[] }) =>
+      out.warnings.find((w) => w.includes('seed path'))
+    const reachWarning = (out: { warnings: string[] }) =>
+      out.warnings.find((w) => w.includes('could not reach the seed URL'))
+
+    it('warns about the seed path only when the crawled URLs (site tree) lack it', async () => {
+      const missing = await runWith(withHeaders('/dash'), join(tmp, 'missing'))
+      expect(seedWarning(missing)).toBe(
+        'seed path /dash was not among the URLs the spider crawled — the session may not have been accepted; check the site headers',
+      )
+      expect(reachWarning(missing)).toBeUndefined()
+      // 10 crawled entries in the fixture (structural nodes and the bad line excluded), un-aliased
+      expect(missing.meta.crawledUrlCount).toBe(10)
+      // the dump script was written for ZAP and referenced by the plan
+      expect(existsSync(join(tmp, 'missing', 'dump-site-tree.js'))).toBe(true)
+
+      // `/admin/config` is in the tree (even though it never raised an alert): no warning
+      const present = await runWith(withHeaders('/admin/config/'), join(tmp, 'present'))
+      expect(seedWarning(present)).toBeUndefined()
     })
 
-    const out = await runZapFe({
-      scanId: 'scan-2',
-      engine: 'zap-fe',
-      site,
-      workDir,
-      env,
-      logger,
-      signal: new AbortController().signal,
+    it('never blames the fragment: a hash-route seed is not checked', async () => {
+      const out = await runWith(withHeaders('/#/dashboard'), join(tmp, 'hash'))
+      expect(seedWarning(out)).toBeUndefined()
+      expect(reachWarning(out)).toBeUndefined()
     })
 
-    expect(out.warnings.some((w) => w.includes('seed path /dash was not among reached URLs'))).toBe(
-      true,
-    )
+    it('reports an unreachable target instead of an auth problem when the spider failed on the seed', async () => {
+      process.env.FAKE_ZAP_STDERR =
+        'Picked up JAVA_TOOL_OPTIONS: -Xmx1024m\nJob spider failed to access URL http://host.docker.internal:3000/dash/ : Network is unreachable\n'
+      try {
+        const out = await runWith(withHeaders('/dash'), join(tmp, 'unreachable'))
+        expect(reachWarning(out)).toBe(
+          'spider could not reach the seed URL /dash (Network is unreachable) — verify the target is up and reachable from the ZAP container (host alias / network) before checking the site headers',
+        )
+        expect(seedWarning(out)).toBeUndefined()
+      } finally {
+        delete process.env.FAKE_ZAP_STDERR
+      }
+    })
+
+    it('skips the seed check when the dump has no readable entry (a corrupt dump is not an empty crawl)', async () => {
+      const corrupt = join(tmp, 'corrupt-site-tree.jsonl')
+      writeFileSync(corrupt, '{"method":"GET"\nnot json at all\n')
+      const out = await runWith(withHeaders('/dash'), join(tmp, 'corrupt'), corrupt)
+      expect(seedWarning(out)).toBeUndefined()
+      expect(out.meta).not.toHaveProperty('crawledUrlCount')
+    })
+
+    it('skips the seed check (and records no crawled count) when the dump is missing', async () => {
+      const fakeBin = writeFakeZap(tmp, FIXTURE)
+      const env: Env = parseEnv({
+        SAKUDA_ENCRYPTION_KEY: key,
+        SAKUDA_ZAP_CMD: fakeBin,
+        SAKUDA_DATA_DIR: tmp,
+      })
+      const out = await runZapFe({
+        scanId: 'scan-2',
+        engine: 'zap-fe',
+        site: withHeaders('/dash'),
+        workDir: join(tmp, 'nodump'),
+        env,
+        logger,
+        signal: new AbortController().signal,
+      })
+      expect(seedWarning(out)).toBeUndefined()
+      expect(out.meta).not.toHaveProperty('crawledUrlCount')
+    })
   })
 
   it('registers the browser-storage selenium script when the site has storage items, and removes it after', async () => {

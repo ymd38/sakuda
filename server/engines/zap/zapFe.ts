@@ -5,12 +5,22 @@ import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeSc
 import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { zapFeHashRouteTargets, zapFeRequestTargets } from '../../domain/nucleiTargets'
+import type { Logger } from '../../lib/logger'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildZapFePlan, planToYaml, ZAP_REPORT_JSON } from './plan'
 import { buildFirefoxPrefsConfig } from './firefoxPrefs'
 import { buildReplacerConf } from './replacer'
 import { normalizeZapReport, parseZapReport } from './report'
 import { runZap, zapPath } from './runZap'
+import {
+  buildSiteTreeDumpScript,
+  parseSiteTreeDump,
+  SITE_TREE_DUMP_ENGINE,
+  SITE_TREE_DUMP_OUTPUT_FILE,
+  SITE_TREE_DUMP_SCRIPT_FILE,
+  SITE_TREE_DUMP_SCRIPT_NAME,
+} from './siteTreeDump'
+import { isSeedAccessFailure, parseJobAccessFailures, seedPathReached } from './spiderReach'
 import {
   BROWSER_STORAGE_SCRIPT_ENGINE,
   BROWSER_STORAGE_SCRIPT_FILE,
@@ -87,6 +97,13 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
           },
         }
       : {}),
+    // What the spiders actually reached, for the seed check below — the
+    // report's alert URIs only list pages that raised an alert.
+    siteTreeDump: {
+      file: zapPath(env, workDir, SITE_TREE_DUMP_SCRIPT_FILE),
+      name: SITE_TREE_DUMP_SCRIPT_NAME,
+      engine: SITE_TREE_DUMP_ENGINE,
+    },
     reportDir: zapPath(env, workDir, '') + '/',
   })
   logger.info(
@@ -118,9 +135,12 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     planYaml: planToYaml(plan),
     replacerConf: site.headers.length ? buildReplacerConf(site.headers) : null,
     config: buildFirefoxPrefsConfig(alias),
-    ...(runDomXssProbe
-      ? {
-          extraFiles: {
+    extraFiles: {
+      [SITE_TREE_DUMP_SCRIPT_FILE]: buildSiteTreeDumpScript(
+        zapPath(env, workDir, SITE_TREE_DUMP_OUTPUT_FILE),
+      ),
+      ...(runDomXssProbe
+        ? {
             [DOM_XSS_PROBE_SCRIPT_FILE]: buildDomXssProbeScript({
               routes: hashRoutes,
               origin: base,
@@ -128,9 +148,9 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
               budgetMs: DOM_XSS_PROBE_BUDGET_MINUTES * 60_000,
               settleMs: DOM_XSS_PROBE_SETTLE_MS,
             }),
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
     ...(hasBrowserStorage
       ? {
           secretFiles: {
@@ -154,18 +174,31 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   // The DOM XSS probe raises its findings as ZAP alerts (already in `n`); its
   // summary file only tells us whether the wall-clock budget cut it short.
   const domXssSummary = runDomXssProbe ? await readDomXssProbeSummary(workDir) : null
+  // Reachability comes from ZAP's own output, never from the alerts: the
+  // spider's access failure on the seed (stderr), and the site tree dumped
+  // right after the spiders (what they really requested).
+  const seedFailure = parseJobAccessFailures(await readWorkFile(workDir, 'stderr.log')).find((f) =>
+    isSeedAccessFailure(f, seedUrl),
+  )
+  const crawledUrls = await readCrawledUrls(workDir, logger, (u) =>
+    restoreLoopbackHost(u, alias, originalHost),
+  )
   const warnings: string[] = []
   if (domXssSummary?.truncated)
     warnings.push(
       `DOM XSS probe hit its ${DOM_XSS_PROBE_BUDGET_MINUTES}-minute budget before covering every hash route — some routes were not tested`,
     )
-  if (
+  if (seedFailure)
+    warnings.push(
+      `spider could not reach the seed URL ${site.zapFeSeedPath} (${seedFailure.reason}) — verify the target is up and reachable from the ZAP container (host alias / network) before checking the site headers`,
+    )
+  else if (
     site.headers.length > 0 &&
-    site.zapFeSeedPath !== '/' &&
-    !n.reachedUrls.some((u) => u.includes(site.zapFeSeedPath))
+    crawledUrls !== null &&
+    seedPathReached(site.zapFeSeedPath, crawledUrls) === false
   )
     warnings.push(
-      `seed path ${site.zapFeSeedPath} was not among reached URLs — the spider may not have been authenticated; check the site headers`,
+      `seed path ${site.zapFeSeedPath} was not among the URLs the spider crawled — the session may not have been accepted; check the site headers`,
     )
   if (n.authFailureCount > 0)
     warnings.push(`${n.authFailureCount} request(s) got 401/403 — headers may be expired`)
@@ -196,6 +229,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
         : {}),
       reachedUrlCount: n.reachedUrls.length,
       reachedUrls: n.reachedUrls.slice(0, 200),
+      ...(crawledUrls !== null ? { crawledUrlCount: crawledUrls.length } : {}),
       authFailureCount: n.authFailureCount,
       alertCounts: n.alertCounts,
       excludeRegexes,
@@ -218,4 +252,40 @@ async function readDomXssProbeSummary(workDir: string) {
   } catch {
     return null
   }
+}
+
+/** A file ZAP's run left in the work dir, or '' when it never wrote one. */
+async function readWorkFile(workDir: string, name: string): Promise<string> {
+  const path = join(workDir, name)
+  return existsSync(path) ? readFile(path, 'utf8') : ''
+}
+
+/** The URLs the spiders requested, from the site-tree dump (un-aliased),
+ * or null when the dump cannot be trusted: missing (the script job did not
+ * run, e.g. ZAP died mid-plan) or yielding no entry while some lines were
+ * unparsable (a corrupt dump, which must not read as "the spider crawled
+ * nothing"). The dump is diagnostic telemetry next to the real report, so
+ * either case is logged and the seed check is skipped, not failed. */
+async function readCrawledUrls(
+  workDir: string,
+  logger: Logger,
+  unalias: (u: string) => string,
+): Promise<string[] | null> {
+  const text = await readWorkFile(workDir, SITE_TREE_DUMP_OUTPUT_FILE)
+  if (text === '') {
+    logger.warn(
+      { workDir, file: SITE_TREE_DUMP_OUTPUT_FILE },
+      'zap-fe site-tree dump missing; seed reachability not checked',
+    )
+    return null
+  }
+  const dump = parseSiteTreeDump(text)
+  if (dump.entries.length === 0 && dump.invalidLines > 0) {
+    logger.warn(
+      { workDir, file: SITE_TREE_DUMP_OUTPUT_FILE, invalidLines: dump.invalidLines },
+      'zap-fe site-tree dump has no readable entry; seed reachability not checked',
+    )
+    return null
+  }
+  return dump.entries.map((e) => unalias(e.url))
 }
