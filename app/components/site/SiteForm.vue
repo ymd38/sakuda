@@ -647,8 +647,9 @@ function handleSubmit() {
           Off (default): passive and signature checks only — nothing that changes state. On: Nuclei
           runs its DAST templates (SQLi, LFI, SSTI, SSRF, …) against target paths that have query
           parameters, e.g. "/search?q=", and ZAP frontend adds an active scan (reflected / DOM XSS)
-          over what its spider found. Only enable this for an environment you own and can reset; it
-          may corrupt or delete data.
+          over what its spider found. It also makes discovery active — the crawl submits forms
+          before you review the results. Only enable this for an environment you own and can reset;
+          it may corrupt or delete data.
         </p>
       </div>
     </fieldset>

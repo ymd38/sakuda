@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { isActiveScanEnabled } from '../../domain/activeScan'
 import { crawledUrlKey, normalizeCrawledEntries } from '../../domain/crawledUrls'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { runCommand } from '../runCommand'
@@ -53,6 +54,9 @@ export async function runKatanaCrawl({
       front: rewriteLoopbackHost(site.frontBaseUrl + '/', env.localhostAlias).replace(/\/$/, ''),
       prefixes: crawlScopePrefixes(site.crawlScopePaths),
     }),
+    // Active discovery: submit forms during the crawl (mutating) only when
+    // the site opted into active checks — never on a passive discovery.
+    activeFormFill: isActiveScanEnabled(site),
   })
   logger.info(
     { discoveryId, engine: 'katana', seedPaths, maxMinutes, headerNames: site.headerNames },

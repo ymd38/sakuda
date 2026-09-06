@@ -1,6 +1,7 @@
 import type { RiskTag, SitePublic } from '#shared/types/api'
 import { RISK_TAGS } from '#shared/types/api'
 import type { TargetMethod } from '#shared/utils/nucleiPaths'
+import { isActiveScanEnabled, type ActiveScanSite } from '#shared/utils/activeScan'
 
 /**
  * HTTP methods that only read: replaying one cannot change the target's
@@ -16,27 +17,13 @@ export function isSafeMethod(method: TargetMethod): boolean {
   return SAFE_METHODS.includes(method)
 }
 
-export type ActiveScanSite = Pick<
-  SitePublic,
-  'allowMutatingRequests' | 'requiresConfirmation' | 'nonLocalConfirmed' | 'nucleiEnabledRiskTags'
->
+// The gate itself lives in shared/utils so the UI warns from the same
+// definition the engines act on; re-exported here so engine code keeps one
+// import for the whole active-scan vocabulary.
+export { isActiveScanEnabled, type ActiveScanSite } from '#shared/utils/activeScan'
 
-/**
- * The one place that decides whether a scan may send active requests
- * (attack payloads that can alter the target's state). Every engine that
- * has an active mode — nuclei's DAST templates, ZAP's FE activeScan —
- * reads this and never re-derives it.
- *
- * Mirrors SPEC §6.1's "environment ∧ scope" conjunction on the MVP's single
- * `sites` row: the user opted this site in (scope) AND ownership of the host
- * is established — local, or non-local and explicitly confirmed
- * (environment). `SiteInputSchema` already refuses an unconfirmed non-local
- * site, so the second term is defence in depth for stale snapshots.
- */
-export function isActiveScanEnabled(site: ActiveScanSite): boolean {
-  if (!site.allowMutatingRequests) return false
-  return !site.requiresConfirmation || site.nonLocalConfirmed
-}
+/** The gate's fields plus the risk-group opt-ins the nuclei adapter reads. */
+export type RiskTagSite = ActiveScanSite & Pick<SitePublic, 'nucleiEnabledRiskTags'>
 
 /**
  * Extra `-tags` each risk toggle must add for the templates it unlocks to
@@ -62,7 +49,7 @@ const RISK_EXTRA_TAGS: Record<RiskTag, readonly string[]> = {
  * always empty — a stale `nucleiEnabledRiskTags` can never re-open the
  * excluded groups on its own. Returned in the fixed {@link RISK_TAGS} order.
  */
-export function effectiveRiskTags(site: ActiveScanSite): RiskTag[] {
+export function effectiveRiskTags(site: RiskTagSite): RiskTag[] {
   if (!isActiveScanEnabled(site)) return []
   return RISK_TAGS.filter((t) => site.nucleiEnabledRiskTags.includes(t))
 }

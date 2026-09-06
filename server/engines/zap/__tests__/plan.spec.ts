@@ -413,7 +413,9 @@ describe('buildZapDiscoverPlan', () => {
         { type: 'passiveScan-config', parameters: { disableAllRules: true } },
         {
           type: 'spider',
-          parameters: { context: 'sakuda', url: 'http://h:3000/', maxDuration: 3 },
+          // postForm pinned off — passive discovery must not POST forms (the
+          // AF spider defaults it to true).
+          parameters: { context: 'sakuda', url: 'http://h:3000/', maxDuration: 3, postForm: false },
         },
         {
           type: 'spiderAjax',
@@ -441,6 +443,27 @@ describe('buildZapDiscoverPlan', () => {
         },
       ],
     })
+  })
+
+  it('gates discovery spider form submission (postForm) on active discovery', () => {
+    const context = { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] }
+    const base = {
+      context,
+      seedUrls: ['http://h:3000/'],
+      spiderMaxMinutes: 3,
+      ajaxMaxMinutes: 3,
+      scriptFile: '/w/d.js',
+      scriptName: 'n',
+      scriptEngine: 'ECMAScript : Graal.js',
+    }
+    const spiderOf = (plan: Record<string, unknown>) =>
+      (plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>).find(
+        (j) => j.type === 'spider',
+      )
+    expect(spiderOf(buildZapDiscoverPlan(base))?.parameters.postForm).toBe(false)
+    expect(spiderOf(buildZapDiscoverPlan({ ...base, postForms: true }))?.parameters.postForm).toBe(
+      true,
+    )
   })
 })
 

@@ -5,6 +5,7 @@ import type {
   DiscoverySummary,
   SitePublic,
 } from '#shared/types/api'
+import { isActiveScanEnabled } from '#shared/utils/activeScan'
 import { parseNucleiPathLines, targetLineKey } from '#shared/utils/nucleiPaths'
 import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
 import { urlToTargetLine } from '#shared/utils/targetLines'
@@ -13,6 +14,9 @@ const props = defineProps<{ site: SitePublic }>()
 const emit = defineEmits<{ saved: [site: SitePublic] }>()
 
 const seeds = computed(() => resolveDiscoverySeeds(props.site))
+// Same gate the engines read (katana -aff, ZAP postForm): the warning must
+// say what discovery will actually do, ownership confirmation included.
+const activeDiscovery = computed(() => isActiveScanEnabled(props.site))
 const storageSummary = computed(() =>
   props.site.browserStorageNames.map((n) => `${n.kind}:${n.name}`).join(', '),
 )
@@ -188,6 +192,16 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
       <template v-else>
         · no browser storage — SPA pages behind a login stay hidden; add the login token in Edit
       </template>
+    </p>
+
+    <p
+      v-if="activeDiscovery"
+      data-testid="active-discovery-warning"
+      class="border-sale bg-soft-cloud text-caption-md text-ink border-l-4 px-4 py-2"
+    >
+      Active checks are on, so discovery submits forms while it crawls (ZAP's spider and katana's
+      form fill) — this writes to the target before you review anything. Only run it against an
+      environment you own and can reset.
     </p>
 
     <p v-if="startError" data-testid="discovery-error" class="text-sale text-body-md">

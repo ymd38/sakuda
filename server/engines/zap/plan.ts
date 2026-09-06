@@ -73,6 +73,11 @@ export interface ZapDiscoverPlanInput {
   scriptFile: string
   scriptName: string
   scriptEngine: string
+  /** Active discovery (Epic #41 PR5): let the traditional spider submit forms
+   * as POST. The AF spider defaults `postForm` to true, so this is pinned
+   * false unless the site opted into active checks — a passive discovery must
+   * not POST forms. `processForm` keeps its default (GET-form discovery). */
+  postForms?: boolean
 }
 
 export const ZAP_REPORT_JSON = 'report.json'
@@ -246,6 +251,9 @@ export function buildZapDiscoverPlan(i: ZapDiscoverPlanInput): Record<string, un
           context: i.context.name,
           url: i.seedUrls[0],
           maxDuration: i.spiderMaxMinutes,
+          // See ZapDiscoverPlanInput.postForms — pinned off unless active
+          // discovery is opted in (the AF spider POSTs forms by default).
+          postForm: Boolean(i.postForms),
         },
       },
       ...i.seedUrls.map((url) => ajaxSpiderJob(i.context.name, url, i.ajaxMaxMinutes)),

@@ -5,6 +5,7 @@ import {
   normalizeCrawledEntries,
   spaLikelyDidNotStart,
 } from '../../domain/crawledUrls'
+import { isActiveScanEnabled } from '../../domain/activeScan'
 import { zapScopeContext } from '../../domain/crawlScope'
 import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
@@ -82,6 +83,9 @@ export const runZapDiscover: DiscoverRunner = async ({
     scriptFile: zapPath(env, workDir, SITE_TREE_DUMP_SCRIPT_FILE),
     scriptName: SITE_TREE_DUMP_SCRIPT_NAME,
     scriptEngine: SITE_TREE_DUMP_ENGINE,
+    // Active discovery: submit forms as POST during the crawl only when the
+    // site opted into active checks (a passive discovery stays GET-only).
+    postForms: isActiveScanEnabled(site),
   })
   logger.info(
     {

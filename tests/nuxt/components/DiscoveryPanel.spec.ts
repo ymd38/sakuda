@@ -113,6 +113,30 @@ describe('DiscoveryPanel', () => {
     expect(buttonElement(wrapper, '[data-testid="save-targets"]').disabled).toBe(true)
   })
 
+  it('warns that discovery submits forms only when active checks are on', async () => {
+    endpoint('/api/sites/site-1/discoveries', () => [])
+    const off = await mountPanel(siteFixture({ allowMutatingRequests: false }))
+    expect(off.find('[data-testid="active-discovery-warning"]').exists()).toBe(false)
+    off.unmount()
+
+    endpoint('/api/sites/site-1/discoveries', () => [])
+    const on = await mountPanel(siteFixture({ allowMutatingRequests: true }))
+    expect(on.find('[data-testid="active-discovery-warning"]').text()).toContain('submits forms')
+    on.unmount()
+
+    // opted in, but ownership of a non-local host is unconfirmed: the engines'
+    // gate (isActiveScanEnabled) keeps discovery passive, so no warning either
+    endpoint('/api/sites/site-1/discoveries', () => [])
+    const unconfirmed = await mountPanel(
+      siteFixture({
+        allowMutatingRequests: true,
+        requiresConfirmation: true,
+        nonLocalConfirmed: false,
+      }),
+    )
+    expect(unconfirmed.find('[data-testid="active-discovery-warning"]').exists()).toBe(false)
+  })
+
   it('lists the latest discovery with unsaved URLs pre-selected and saved ones marked', async () => {
     endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
     endpoint('/api/discoveries/disc-1', () => detailFixture())

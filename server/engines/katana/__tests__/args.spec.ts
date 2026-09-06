@@ -56,6 +56,17 @@ describe('buildKatanaArgs', () => {
     expect(buildKatanaArgs(base)).not.toContain('-cs')
   })
 
+  it('adds -aff (automatic form fill) only when active form fill is on; argv unchanged otherwise', () => {
+    const base = { seedsFile: 's', outputFile: 'o', maxMinutes: 1, headers: [] }
+    const active = buildKatanaArgs({ ...base, activeFormFill: true })
+    expect(active).toContain('-aff')
+    // -aff sits just before -ct (after the scope block)
+    expect(active[active.indexOf('-aff') + 1]).toBe('-ct')
+    expect(buildKatanaArgs({ ...base, activeFormFill: false })).not.toContain('-aff')
+    expect(buildKatanaArgs(base)).not.toContain('-aff')
+    expect(buildKatanaArgs({ ...base, activeFormFill: false })).toEqual(buildKatanaArgs(base))
+  })
+
   it('appends one -H pair per header', () => {
     const args = buildKatanaArgs({
       seedsFile: 's',

@@ -216,6 +216,37 @@ describe('runKatanaCrawl', () => {
     ])
   })
 
+  it('adds -aff only when active discovery is opted in and ownership is confirmed (three-state gate)', async () => {
+    const argvFor = async (site: SiteWithHeaders, dir: string) => {
+      const fakeBin = writeFakeBin(tmp, 'fake-katana.js', FAKE_SUCCESS)
+      await runKatanaCrawl({
+        discoveryId: 'disc-aff',
+        site,
+        workDir: join(tmp, dir),
+        env: envWith(tmp, fakeBin),
+        logger,
+        signal: new AbortController().signal,
+      })
+      return JSON.parse(readFileSync(join(tmp, dir, 'katana', 'argv.json'), 'utf8')) as string[]
+    }
+    // opted out → no -aff
+    expect(await argvFor(baseSite(), 'off')).not.toContain('-aff')
+    // opted in + local (ownership implicit) → -aff
+    expect(await argvFor(baseSite({ allowMutatingRequests: true }), 'on')).toContain('-aff')
+    // opted in but non-local and unconfirmed → gate fails closed, no -aff
+    expect(
+      await argvFor(
+        baseSite({
+          frontBaseUrl: 'https://staging.example.test',
+          allowMutatingRequests: true,
+          requiresConfirmation: true,
+          nonLocalConfirmed: false,
+        }),
+        'unconfirmed',
+      ),
+    ).not.toContain('-aff')
+  })
+
   it('never logs header values', async () => {
     const fakeBin = writeFakeBin(tmp, 'fake-katana.js', FAKE_SUCCESS)
     const lines: string[] = []

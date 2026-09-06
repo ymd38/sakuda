@@ -13,6 +13,11 @@ export interface KatanaArgsInput {
   /** `-cs` regexes (see `domain/crawlScope` `katanaScopeRegexes`); empty
    * when the site sets no crawl scope, so the argv is unchanged. */
   crawlScopeRegexes?: string[]
+  /** Active discovery (Epic #41 PR5): add `-aff` (automatic form filling) so
+   * katana submits the forms it finds — a mutating action gated on the
+   * site's active-checks opt-in (see `domain/activeScan`). Off → the default
+   * static crawl, argv unchanged. */
+  activeFormFill?: boolean
 }
 
 /** Fixed: measured on Juice Shop (2026-09-03) — `-jc` is what finds the API
@@ -36,6 +41,7 @@ export function buildKatanaArgs(i: KatanaArgsInput): string[] {
     '-fs',
     'fqdn',
     ...(i.crawlScopeRegexes ?? []).flatMap((r) => ['-cs', r]),
+    ...(i.activeFormFill ? ['-aff'] : []),
     '-ct',
     `${i.maxMinutes}m`,
     '-jsonl',
