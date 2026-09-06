@@ -4,11 +4,21 @@ import {
   effectiveRiskTags,
   FUZZ_SEED_VALUE,
   isActiveScanEnabled,
+  isSafeMethod,
   riskExcludeTags,
   riskExtraTags,
+  SAFE_METHODS,
   seedEmptyQueryValues,
 } from '../activeScan'
 import type { RiskTag } from '#shared/types/api'
+
+describe('isSafeMethod / SAFE_METHODS', () => {
+  it('treats read-only verbs as safe and mutating verbs as not', () => {
+    expect(SAFE_METHODS).toEqual(['GET', 'HEAD', 'OPTIONS'])
+    for (const m of ['GET', 'HEAD', 'OPTIONS'] as const) expect(isSafeMethod(m)).toBe(true)
+    for (const m of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) expect(isSafeMethod(m)).toBe(false)
+  })
+})
 
 describe('isActiveScanEnabled', () => {
   it('is off by default (no opt-in) even for a local site', () => {

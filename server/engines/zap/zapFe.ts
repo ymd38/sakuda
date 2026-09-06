@@ -6,6 +6,7 @@ import { zapScopeContext } from '../../domain/crawlScope'
 import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import {
+  countSkippedMethods,
   expandNucleiTargets,
   zapFeHashRouteTargets,
   zapFeRequestTargets,
@@ -59,22 +60,24 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   // site's ZAP API limit: it is the one active-scan budget the site defines.
   const activeScan = isActiveScanEnabled(site)
   const activeScanMaxMinutes = activeScan ? site.zapApiMaxMinutes : 0
+  // Expand the saved targets once; the requestor, the DOM probe and the skip
+  // telemetry all read this one result.
+  const expanded = expandNucleiTargets(site)
   // Saved targets the spiders may never reach get requested up front so the
   // scans see them; an active run seeds empty query values (`?q=` → `?q=1`)
   // exactly as nuclei's transient targets file does — the saved list is untouched.
-  const savedTargets = zapFeRequestTargets(site).map((u) => rewriteLoopbackHost(u, alias))
+  const savedTargets = zapFeRequestTargets(expanded).map((u) => rewriteLoopbackHost(u, alias))
   const requestUrls = activeScan ? seedEmptyQueryValues(savedTargets) : savedTargets
-  // Non-GET saved lines are not replayed yet (Epic #41): the requestor and DOM
-  // probe get GET targets only (via expandNucleiTargets). Report what was
-  // skipped so it is not silently dropped. One extra parse until PR2 folds
-  // this into a typed expansion.
-  const { skippedMethods } = expandNucleiTargets(site)
+  // Non-GET saved lines are not replayed yet (Epic #41): the requestor sends
+  // GET only (PR4 will send them as structured requests). Count the front-base
+  // non-GET targets — the requestor's scope — so they are not silently dropped.
+  const skippedMethods = countSkippedMethods(expanded.targets.filter((t) => t.base === 'front'))
   // Hash-route targets (`/#/search?q=`) can only be tested from a real
   // browser (the fragment never reaches ZAP's proxy), and only when the site
   // opted into active checks. The probe injects into the empty query value
   // itself, so unlike requestUrls these are not seeded here.
   const hashRoutes = activeScan
-    ? zapFeHashRouteTargets(site).map((u) => rewriteLoopbackHost(u, alias))
+    ? zapFeHashRouteTargets(expanded).map((u) => rewriteLoopbackHost(u, alias))
     : []
   const runDomXssProbe = hashRoutes.length > 0
   // The front origin whole, or — with a crawl scope — its prefixes, the seed

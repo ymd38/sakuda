@@ -213,19 +213,48 @@ describe('runNuclei', () => {
     const out = await runNuclei({
       scanId: 'scan-skip',
       engine: 'nuclei',
+      // the two `POST /api/x` lines collapse (dedupe is method+base+url)
       site: baseSite({ nucleiPaths: '/get-one\nPOST /api/x\nPOST /api/x\nDELETE /y\nHEAD /z' }),
       workDir,
       env,
       logger,
       signal: new AbortController().signal,
     })
-    expect(out.meta.skippedMethods).toEqual({ POST: 2, DELETE: 1, HEAD: 1 })
+    expect(out.meta.skippedMethods).toEqual({ POST: 1, DELETE: 1, HEAD: 1 })
     expect(out.meta.urlCount).toBe(1)
     const targets = readFileSync(join(workDir, 'targets.txt'), 'utf8')
     expect(targets).toContain('/get-one')
     expect(targets).not.toContain('/api/x')
     expect(targets).not.toContain('/y')
     expect(targets).not.toContain('/z')
+  })
+
+  it('writes one target when a front line and an api: line resolve to the same URL', async () => {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_SUCCESS)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'same-url')
+    const out = await runNuclei({
+      scanId: 'scan-same-url',
+      engine: 'nuclei',
+      // apiBaseUrl is the front base plus `/api`, so `/api/x` and `api:/x`
+      // are the same request; the expansion keeps both (identity is
+      // method+base+url) and nuclei must not replay the URL twice
+      site: baseSite({
+        apiBaseUrl: 'http://localhost:3001/api',
+        nucleiPaths: '/api/x\napi:/x\nPOST /api/y\nPOST api:/y',
+      }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    expect(readFileSync(join(workDir, 'targets.txt'), 'utf8')).toBe('http://localhost:3001/api/x\n')
+    expect(out.meta.urlCount).toBe(1)
+    expect(out.meta.skippedMethods).toEqual({ POST: 1 })
   })
 })
 

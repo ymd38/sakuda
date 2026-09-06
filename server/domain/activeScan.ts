@@ -1,5 +1,20 @@
 import type { RiskTag, SitePublic } from '#shared/types/api'
 import { RISK_TAGS } from '#shared/types/api'
+import type { TargetMethod } from '#shared/utils/nucleiPaths'
+
+/**
+ * HTTP methods that only read: replaying one cannot change the target's
+ * state, so it needs no active-scan opt-in. The mutating verbs
+ * (POST/PUT/PATCH/DELETE) do — an engine that replays one must gate it on
+ * {@link isActiveScanEnabled}. This is the classification only; the gate
+ * itself stays `isActiveScanEnabled`, added where a dangerous method is
+ * actually dispatched (Epic #41 PR3/PR4), so the two decisions do not fuse.
+ */
+export const SAFE_METHODS: readonly TargetMethod[] = ['GET', 'HEAD', 'OPTIONS']
+
+export function isSafeMethod(method: TargetMethod): boolean {
+  return SAFE_METHODS.includes(method)
+}
 
 export type ActiveScanSite = Pick<
   SitePublic,

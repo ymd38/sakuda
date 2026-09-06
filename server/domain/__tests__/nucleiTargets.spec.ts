@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countSkippedMethods,
   expandNucleiTargets,
   zapFeHashRouteTargets,
   zapFeRequestTargets,
+  type ExpandedTarget,
   type NucleiTargetSite,
 } from '../nucleiTargets'
 
@@ -13,119 +15,108 @@ const site: NucleiTargetSite = {
   excludePaths: '',
 }
 
+const urlsOf = (site: NucleiTargetSite) => expandNucleiTargets(site).targets.map((t) => t.url)
+
 describe('expandNucleiTargets', () => {
-  it('defaults to the base URL roots when no paths are configured', () => {
+  it('defaults to the base URL roots (GET) when no paths are configured', () => {
     const defaulted = expandNucleiTargets({ ...site, nucleiPaths: '' })
-    expect(defaulted.urls).toEqual(['http://localhost:3000/', 'http://localhost:8080/'])
+    expect(defaulted.targets).toEqual([
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/' },
+      { method: 'GET', base: 'api', url: 'http://localhost:8080/' },
+    ])
     expect(defaulted.configured).toBe(false)
     expect(expandNucleiTargets(site).configured).toBe(true)
-    expect(
-      expandNucleiTargets({ ...site, nucleiPaths: '# only a comment', apiBaseUrl: null }).urls,
-    ).toEqual(['http://localhost:3000/'])
+    expect(urlsOf({ ...site, nucleiPaths: '# only a comment', apiBaseUrl: null })).toEqual([
+      'http://localhost:3000/',
+    ])
   })
 
   it('resolves front and api lines to the right bases, skipping comments', () => {
-    const { urls, excluded } = expandNucleiTargets(site)
-    expect(urls).toEqual([
-      'http://localhost:3000/',
-      'http://localhost:8080/v1/users',
-      'http://localhost:3000/login',
+    const { targets, excluded } = expandNucleiTargets(site)
+    expect(targets).toEqual([
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/' },
+      { method: 'GET', base: 'api', url: 'http://localhost:8080/v1/users' },
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/login' },
     ])
     expect(excluded).toEqual([])
   })
 
-  it('drops excluded paths into excluded', () => {
-    const { urls, excluded } = expandNucleiTargets({ ...site, excludePaths: '/login' })
-    expect(urls).toEqual(['http://localhost:3000/', 'http://localhost:8080/v1/users'])
+  it('drops excluded GET paths into excluded', () => {
+    const { targets, excluded } = expandNucleiTargets({ ...site, excludePaths: '/login' })
+    expect(targets.map((t) => t.url)).toEqual([
+      'http://localhost:3000/',
+      'http://localhost:8080/v1/users',
+    ])
     expect(excluded).toEqual(['http://localhost:3000/login'])
   })
 
-  it('removes duplicate urls, preserving first-seen order', () => {
-    const { urls } = expandNucleiTargets({
+  it('keeps every method; dedupe is method+base+url, so a POST never hides a GET', () => {
+    const { targets } = expandNucleiTargets({
       ...site,
-      nucleiPaths: '/login\n/login\napi:/v1/users',
+      nucleiPaths: 'POST /x\n/x\nGET /x\nPOST /x\napi:/x\n/x',
     })
-    expect(urls).toEqual(['http://localhost:3000/login', 'http://localhost:8080/v1/users'])
+    expect(targets).toEqual([
+      { method: 'POST', base: 'front', url: 'http://localhost:3000/x' },
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/x' },
+      { method: 'GET', base: 'api', url: 'http://localhost:8080/x' },
+    ])
   })
 
   it('skips "api:" lines when apiBaseUrl is not set', () => {
-    const { urls } = expandNucleiTargets({ ...site, apiBaseUrl: null, nucleiPaths: 'api:/v1/x' })
-    expect(urls).toEqual([])
+    expect(urlsOf({ ...site, apiBaseUrl: null, nucleiPaths: 'api:/v1/x' })).toEqual([])
   })
 
-  it('keeps only GET lines, counts non-GET in skippedMethods (before dedupe/exclusion), and never downgrades', () => {
-    const r = expandNucleiTargets({
-      ...site,
-      nucleiPaths: '/get\nPOST /p\nPOST /p\nDELETE /d\napi:/g\nHEAD /h',
-    })
-    expect(r.urls).toEqual(['http://localhost:3000/get', 'http://localhost:8080/g'])
-    expect(r.skippedMethods).toEqual({ POST: 2, DELETE: 1, HEAD: 1 })
-    expect(r.configured).toBe(true)
-  })
-
-  it('does not expose a skipped non-GET path via excluded', () => {
+  it('does not expose an excluded non-GET path via excluded (its path stays hidden)', () => {
     const r = expandNucleiTargets({ ...site, nucleiPaths: 'POST /secret', excludePaths: '/secret' })
     expect(r.excluded).toEqual([])
-    expect(r.skippedMethods).toEqual({ POST: 1 })
-  })
-
-  it('the root fallback (no saved lines) is GET and reports no skips', () => {
-    const r = expandNucleiTargets({ ...site, nucleiPaths: '' })
-    expect(r.configured).toBe(false)
-    expect(r.skippedMethods).toEqual({})
+    // the POST target was excluded, so it is not in targets either
+    expect(r.targets).toEqual([])
   })
 })
 
-describe('zapFeRequestTargets', () => {
-  it('returns [] when no target lines are configured — the root fallback is not a target', () => {
-    expect(zapFeRequestTargets({ ...site, nucleiPaths: '' })).toEqual([])
-    expect(zapFeRequestTargets({ ...site, nucleiPaths: '# only a comment' })).toEqual([])
-  })
-
-  it('keeps front-origin targets only: no api: lines, no hash routes', () => {
-    expect(
-      zapFeRequestTargets({
-        ...site,
-        nucleiPaths: '/\n/search?q=\napi:/v1/users\n/#/search?q=\n/greet?name=a#top',
-      }),
-    ).toEqual(['http://localhost:3000/', 'http://localhost:3000/search?q='])
-  })
-
-  it('applies the exclude paths the same way as nuclei', () => {
-    expect(zapFeRequestTargets({ ...site, excludePaths: '/login' })).toEqual([
-      'http://localhost:3000/',
-    ])
+describe('countSkippedMethods', () => {
+  it('counts non-GET targets by method, ignoring GET', () => {
+    const targets: ExpandedTarget[] = [
+      { method: 'GET', base: 'front', url: 'http://x/a' },
+      { method: 'POST', base: 'front', url: 'http://x/b' },
+      { method: 'POST', base: 'api', url: 'http://x/c' },
+      { method: 'DELETE', base: 'front', url: 'http://x/d' },
+    ]
+    expect(countSkippedMethods(targets)).toEqual({ POST: 2, DELETE: 1 })
+    expect(countSkippedMethods([{ method: 'GET', base: 'front', url: 'http://x/a' }])).toEqual({})
   })
 })
 
-describe('zapFeHashRouteTargets', () => {
-  it('returns [] when no target lines are configured', () => {
-    expect(zapFeHashRouteTargets({ ...site, nucleiPaths: '' })).toEqual([])
-    expect(zapFeHashRouteTargets({ ...site, nucleiPaths: '# only a comment' })).toEqual([])
+describe('zapFeRequestTargets / zapFeHashRouteTargets (over the expanded result)', () => {
+  const expand = (nucleiPaths: string, excludePaths = '') =>
+    expandNucleiTargets({ ...site, nucleiPaths, excludePaths })
+
+  it('return [] when no target lines are configured — the root fallback is not a target', () => {
+    expect(zapFeRequestTargets(expand(''))).toEqual([])
+    expect(zapFeHashRouteTargets(expand('# only a comment'))).toEqual([])
   })
 
-  it('keeps only front-origin targets that contain "#" — the complement of zapFeRequestTargets', () => {
-    const s = {
-      ...site,
-      nucleiPaths: '/\n/search?q=\napi:/v1/users\n/#/search?q=\n/#/track?id=',
-    }
-    expect(zapFeHashRouteTargets(s)).toEqual([
-      'http://localhost:3000/#/search?q=',
-      'http://localhost:3000/#/track?id=',
-    ])
-    // request targets and hash-route targets partition the front-origin lines
-    expect(zapFeRequestTargets(s)).toEqual([
+  it('keep front-base GET targets only: no api: lines, no non-GET, split on the fragment', () => {
+    const e = expand('/\n/search?q=\napi:/v1/users\nPOST /mut\n/#/search?q=\n/greet?name=a#top')
+    expect(zapFeRequestTargets(e)).toEqual([
       'http://localhost:3000/',
       'http://localhost:3000/search?q=',
     ])
+    // any front-base GET URL carrying a fragment is a hash route
+    expect(zapFeHashRouteTargets(e)).toEqual([
+      'http://localhost:3000/#/search?q=',
+      'http://localhost:3000/greet?name=a#top',
+    ])
   })
 
-  it('drops api: hash lines (they resolve to the API origin, not the front)', () => {
-    expect(
-      zapFeHashRouteTargets({
-        ...site,
-        nucleiPaths: 'api:/#/x\n/#/keep?q=',
-      }),
-    ).toEqual(['http://localhost:3000/#/keep?q='])
+  it('apply the exclude paths the same way as nuclei', () => {
+    expect(zapFeRequestTargets(expand('', '/login'))).toEqual([])
+    expect(zapFeRequestTargets(expand('/\n/login', '/login'))).toEqual(['http://localhost:3000/'])
+  })
+
+  it('drop api: hash lines (they resolve to the API base, not the front)', () => {
+    expect(zapFeHashRouteTargets(expand('api:/#/x\n/#/keep?q='))).toEqual([
+      'http://localhost:3000/#/keep?q=',
+    ])
   })
 })

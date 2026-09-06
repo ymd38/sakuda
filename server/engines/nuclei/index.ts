@@ -10,19 +10,31 @@ import {
   seedEmptyQueryValues,
 } from '../../domain/activeScan'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
-import { expandNucleiTargets } from '../../domain/nucleiTargets'
+import { countSkippedMethods, expandNucleiTargets } from '../../domain/nucleiTargets'
 import { runCommand } from '../runCommand'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildNucleiArgs, nucleiTagsFor } from './args'
 import { normalizeNucleiLines, parseNucleiJsonl, parseNucleiStats } from './normalize'
 
 export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
-  const { urls: allUrls, excluded, skippedMethods } = expandNucleiTargets(site)
+  const { targets, excluded } = expandNucleiTargets(site)
   // Hash routes (`/#/search?q=`) are SPA client routes: the fragment never
   // reaches the server, so requesting one just GETs `/`. nuclei is
   // server-side, so it cannot test them — they are handled by the zap-fe DOM
-  // XSS probe instead (see domXssProbeScript). Drop them here.
-  const urls = allUrls.filter((u) => !u.includes('#'))
+  // XSS probe instead (see domXssProbeScript). Drop them here, across both bases.
+  // A target's identity upstream is method+base+url, so a front line and an
+  // `api:` line that resolve to the same URL (front and api may share an
+  // origin) are two targets there. To nuclei they are one request: collapse
+  // on method+url so the targets file and the counts do not repeat it.
+  const replayable = uniqueBy(
+    targets.filter((t) => !t.url.includes('#')),
+    (t) => `${t.method}|${t.url}`,
+  )
+  // nuclei's `-l` list is a URL/GET replay; non-GET saved lines are not sent
+  // yet (PR3 feeds them through a generated OpenAPI). Count them here, after
+  // the hash-route rule, so the skip reflects nuclei's own scope.
+  const urls = replayable.filter((t) => t.method === 'GET').map((t) => t.url)
+  const skippedMethods = countSkippedMethods(replayable)
   if (urls.length === 0)
     throw new EngineError(
       'nuclei: no GET target URLs (nucleiPaths is empty, every path is excluded, or every saved line is a non-GET method, which is not replayed yet)',
@@ -137,4 +149,15 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       timedOut: result.timedOut,
     },
   }
+}
+
+/** First occurrence per key, order preserved. */
+function uniqueBy<T>(items: T[], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = keyOf(item)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
