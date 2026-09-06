@@ -38,6 +38,24 @@ describe('buildKatanaArgs', () => {
     expect(args).not.toContain('-ob')
   })
 
+  it('adds one -cs pair per crawl-scope regex right after the host scope, none when unrestricted', () => {
+    const base = { seedsFile: 's', outputFile: 'o', maxMinutes: 1, headers: [] }
+    const scoped = buildKatanaArgs({
+      ...base,
+      crawlScopeRegexes: ['^http://h:3000/rest(/.*)?(\\?.*)?$', '^http://h:3000/$'],
+    })
+    expect(scoped.slice(7, 13)).toEqual([
+      '-fs',
+      'fqdn',
+      '-cs',
+      '^http://h:3000/rest(/.*)?(\\?.*)?$',
+      '-cs',
+      '^http://h:3000/$',
+    ])
+    expect(buildKatanaArgs({ ...base, crawlScopeRegexes: [] })).toEqual(buildKatanaArgs(base))
+    expect(buildKatanaArgs(base)).not.toContain('-cs')
+  })
+
   it('appends one -H pair per header', () => {
     const args = buildKatanaArgs({
       seedsFile: 's',

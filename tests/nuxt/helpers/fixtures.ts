@@ -63,6 +63,7 @@ export function scanDetailFixture(overrides: Partial<ScanDetail> = {}): ScanDeta
       hasOpenapiJson: false,
       zapFeSeedPath: '/',
       discoverySeedPaths: '',
+      crawlScopePaths: '',
       excludePaths: '',
       nucleiRateLimit: 50,
       zapApiMaxMinutes: 45,

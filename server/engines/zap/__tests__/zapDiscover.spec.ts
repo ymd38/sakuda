@@ -26,6 +26,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     openapiJson: null,
     zapFeSeedPath: '/',
     discoverySeedPaths: '',
+    crawlScopePaths: '',
     excludePaths: '/admin/*',
     nucleiRateLimit: 50,
     zapApiMaxMinutes: 45,
@@ -219,6 +220,63 @@ describe('runZapDiscover', () => {
       '^http:\\/\\/localhost:3000(/.*)?$',
       '^http:\\/\\/localhost:8080(/.*)?$',
     ])
+  })
+
+  it('narrows the context to the crawl scope: roots as context URLs, prefixes + seeds + api included; drops out-of-scope URLs', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+      SAKUDA_LOCALHOST_ALIAS: 'host.docker.internal',
+    })
+    const workDir = join(tmp, 'work')
+
+    const out = await runZapDiscover({
+      discoveryId: 'disc-scope',
+      site: baseSite({
+        apiBaseUrl: 'http://localhost:8080',
+        discoverySeedPaths: '/#/',
+        crawlScopePaths: '/rest\n/api/Challenges',
+      }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const plan: unknown = YAML.parse(readFileSync(join(workDir, 'plan.yaml'), 'utf8'))
+    // as: see above
+    const { env: planEnv, jobs } = plan as {
+      env: PlanShape['env'] & { contexts: Array<{ urls: string[] }> }
+      jobs: PlanShape['jobs']
+    }
+    // AF turns each context URL into `<url>.*`, so the seed must not be one — the roots are
+    expect(planEnv.contexts[0]?.urls).toEqual([
+      'http://host.docker.internal:3000/rest/',
+      'http://host.docker.internal:3000/api/Challenges/',
+      'http://host.docker.internal:8080/',
+    ])
+    expect(planEnv.contexts[0]?.includePaths).toEqual([
+      '^http:\\/\\/host\\.docker\\.internal:3000\\/rest(/.*)?(\\?.*)?$',
+      '^http:\\/\\/host\\.docker\\.internal:3000\\/api\\/Challenges(/.*)?(\\?.*)?$',
+      '^http:\\/\\/host\\.docker\\.internal:3000\\/(#.*)?$',
+      '^http:\\/\\/host\\.docker\\.internal:8080(/.*)?$',
+    ])
+    // the spiders still start from the seed
+    expect(jobs[1]?.parameters.url).toBe('http://host.docker.internal:3000/#/')
+    // the fixture's `/admin/config` (excluded before) is now out of scope first; `/` is the seed
+    expect(out.urls.map((u) => u.url)).toEqual([
+      'http://localhost:3000/',
+      'http://localhost:3000/api/Challenges/?name=Score%20Board',
+      'http://localhost:3000/rest/products/search?q=',
+      'http://localhost:3000/rest/basket/6',
+    ])
+    // scope is decided right after the origin: the asset, the two noise URLs and the
+    // excluded `/admin/config` all count as outOfScope now, nothing else
+    expect(out.meta).toMatchObject({
+      dropped: { sameOriginOnly: 1, outOfScope: 4, asset: 0, noise: 0, excluded: 0 },
+    })
   })
 
   it('with browser storage + several seeds: writes the selenium script 0600 for the run only, registers it, and crawls every seed', async () => {

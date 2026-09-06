@@ -12,6 +12,7 @@ const siteSnapshot: SiteSnapshot = {
   hasOpenapiJson: false,
   zapFeSeedPath: '/',
   discoverySeedPaths: '',
+  crawlScopePaths: '',
   excludePaths: '',
   nucleiRateLimit: 50,
   zapApiMaxMinutes: 10,

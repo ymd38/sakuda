@@ -74,6 +74,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     openapiJson: null,
     zapFeSeedPath: '/',
     discoverySeedPaths: '',
+    crawlScopePaths: '',
     excludePaths: '/admin/*',
     nucleiRateLimit: 50,
     zapApiMaxMinutes: 45,
@@ -150,6 +151,7 @@ describe('runKatanaCrawl', () => {
       dropped: {
         invalid: 0,
         sameOriginOnly: 1,
+        outOfScope: 0,
         asset: 1,
         noise: 0,
         excluded: 1,

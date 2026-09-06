@@ -1,0 +1,1 @@
+ALTER TABLE `sites` ADD `crawl_scope_paths` text DEFAULT '' NOT NULL;

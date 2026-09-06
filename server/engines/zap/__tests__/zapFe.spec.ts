@@ -26,6 +26,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     openapiJson: null,
     zapFeSeedPath: '/',
     discoverySeedPaths: '',
+    crawlScopePaths: '',
     excludePaths: '',
     nucleiRateLimit: 50,
     zapApiMaxMinutes: 45,
@@ -270,6 +271,46 @@ describe('runZapFe', () => {
     const off = await run(join(tmp, 'off'), false)
     expect(probeJobsOf(join(tmp, 'off'))).toEqual([])
     expect(off.meta.hashRouteCount).toBe(0)
+  })
+
+  it('narrows the context to the crawl scope: front prefixes, the seed and the api subtree', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+      SAKUDA_ZAP_LOCALHOST_ALIAS: 'host.docker.internal',
+    })
+    const workDir = join(tmp, 'work')
+
+    await runZapFe({
+      scanId: 'scan-scope',
+      engine: 'zap-fe',
+      site: baseSite({
+        apiBaseUrl: 'http://localhost:8080',
+        zapFeSeedPath: '/#/',
+        crawlScopePaths: '/rest',
+      }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const plan: unknown = YAML.parse(readFileSync(join(workDir, 'plan.yaml'), 'utf8'))
+    // as: narrow just enough for the context
+    const context = (
+      plan as { env: { contexts: Array<{ urls: string[]; includePaths: string[] }> } }
+    ).env.contexts[0]
+    expect(context?.urls).toEqual([
+      'http://host.docker.internal:3000/rest/',
+      'http://host.docker.internal:8080/',
+    ])
+    expect(context?.includePaths).toEqual([
+      '^http:\\/\\/host\\.docker\\.internal:3000\\/rest(/.*)?(\\?.*)?$',
+      '^http:\\/\\/host\\.docker\\.internal:3000\\/(#.*)?$',
+      '^http:\\/\\/host\\.docker\\.internal:8080(/.*)?$',
+    ])
   })
 
   it('keeps the active scan off for an unconfirmed non-local site even when opted in', async () => {

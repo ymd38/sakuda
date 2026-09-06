@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeScan'
-import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
+import { zapScopeContext } from '../../domain/crawlScope'
+import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { zapFeHashRouteTargets, zapFeRequestTargets } from '../../domain/nucleiTargets'
 import type { Logger } from '../../lib/logger'
@@ -21,6 +22,7 @@ import {
   SITE_TREE_DUMP_SCRIPT_NAME,
 } from './siteTreeDump'
 import { isSeedAccessFailure, parseJobAccessFailures, seedPathReached } from './spiderReach'
+import { crawlScopePrefixes } from '#shared/utils/crawlScope'
 import {
   BROWSER_STORAGE_SCRIPT_ENGINE,
   BROWSER_STORAGE_SCRIPT_FILE,
@@ -66,13 +68,23 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     ? zapFeHashRouteTargets(site).map((u) => rewriteLoopbackHost(u, alias))
     : []
   const runDomXssProbe = hashRoutes.length > 0
+  // The front origin whole, or — with a crawl scope — its prefixes, the seed
+  // itself and the `apiBaseUrl` subtree (see domain/crawlScope): the same
+  // rule as discovery, so a same-origin `/api` next to a scoped `/app` stays
+  // reachable. Unrestricted, the API is left out as it always was here — the
+  // plan must not change for sites that set no scope.
+  const scopePrefixes = crawlScopePrefixes(site.crawlScopePaths)
+  const scope = zapScopeContext({
+    seedUrls: [seedUrl],
+    front: base,
+    api:
+      scopePrefixes.length > 0 && site.apiBaseUrl
+        ? rewriteLoopbackHost(site.apiBaseUrl + '/', alias).replace(/\/$/, '')
+        : null,
+    prefixes: scopePrefixes,
+  })
   const plan = buildZapFePlan({
-    context: {
-      name: 'sakuda',
-      urls: [seedUrl],
-      includePaths: [`^${escapeRegex(base)}(/.*)?$`],
-      excludePaths: excludeRegexes,
-    },
+    context: { name: 'sakuda', ...scope, excludePaths: excludeRegexes },
     seedUrl,
     ...(hasBrowserStorage
       ? {

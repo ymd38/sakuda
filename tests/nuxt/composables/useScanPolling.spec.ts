@@ -28,6 +28,7 @@ function scanFixture(overrides: Partial<ScanDetail> = {}): ScanDetail {
       hasOpenapiJson: false,
       zapFeSeedPath: '/',
       discoverySeedPaths: '',
+      crawlScopePaths: '',
       excludePaths: '',
       nucleiRateLimit: 50,
       zapApiMaxMinutes: 45,

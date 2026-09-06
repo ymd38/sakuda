@@ -10,6 +10,9 @@ export interface KatanaArgsInput {
    * `runCommand` timeout above it is the hard stop. */
   maxMinutes: number
   headers: Header[]
+  /** `-cs` regexes (see `domain/crawlScope` `katanaScopeRegexes`); empty
+   * when the site sets no crawl scope, so the argv is unchanged. */
+  crawlScopeRegexes?: string[]
 }
 
 /** Fixed: measured on Juice Shop (2026-09-03) — `-jc` is what finds the API
@@ -18,7 +21,9 @@ export const KATANA_MAX_DEPTH = 3
 
 /** Static crawl only: no headless browser (ZAP's Ajax spider covers SPA
  * click-through). `-fs fqdn` limits the crawl to the seed's host, so an
- * `apiBaseUrl` on another origin is not followed — ZAP still covers it. */
+ * `apiBaseUrl` on another origin is not followed — ZAP still covers it. A
+ * site's crawl scope adds `-cs` regexes on top (katana 1.7.0 applies the
+ * host scope and the URL regexes cumulatively). */
 export function buildKatanaArgs(i: KatanaArgsInput): string[] {
   return [
     '-list',
@@ -30,6 +35,7 @@ export function buildKatanaArgs(i: KatanaArgsInput): string[] {
     String(KATANA_MAX_DEPTH),
     '-fs',
     'fqdn',
+    ...(i.crawlScopeRegexes ?? []).flatMap((r) => ['-cs', r]),
     '-ct',
     `${i.maxMinutes}m`,
     '-jsonl',

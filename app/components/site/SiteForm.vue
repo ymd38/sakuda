@@ -39,6 +39,7 @@ const form = reactive({
   openapiJson: props.initial?.openapiJson ?? '',
   zapFeSeedPath: props.initial?.zapFeSeedPath ?? '/',
   discoverySeedPaths: props.initial?.discoverySeedPaths ?? '',
+  crawlScopePaths: props.initial?.crawlScopePaths ?? '',
   excludePaths: props.initial?.excludePaths ?? '',
   nucleiRateLimit: props.initial?.nucleiRateLimit ?? 50,
   zapApiMaxMinutes: props.initial?.zapApiMaxMinutes ?? 45,
@@ -169,6 +170,7 @@ function buildPayload(): SiteUpdateInput {
     openapiJson: emptyToNull(form.openapiJson),
     zapFeSeedPath: form.zapFeSeedPath,
     discoverySeedPaths: form.discoverySeedPaths,
+    crawlScopePaths: form.crawlScopePaths,
     excludePaths: form.excludePaths,
     nucleiRateLimit: toFiniteNumber(form.nucleiRateLimit, 50),
     zapApiMaxMinutes: toFiniteNumber(form.zapApiMaxMinutes, 45),
@@ -454,6 +456,28 @@ function handleSubmit() {
           Where "Discover URLs" (ZAP's crawl-only run) starts, one path per line; each gets its own
           Ajax spider run. List the pages of your app (hash routes are fine) so the APIs behind them
           are found and can be saved as Nuclei target paths. Not used by Nuclei itself.
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label for="site-crawl-scope-paths" class="text-caption-md font-medium text-ink"
+          >Crawl scope paths
+          <span class="text-mute">(optional — empty crawls the whole origin)</span></label
+        >
+        <textarea
+          id="site-crawl-scope-paths"
+          v-model="form.crawlScopePaths"
+          data-testid="crawl-scope-paths"
+          rows="3"
+          placeholder="/app&#10;/rest"
+          class="textarea-soft"
+        />
+        <p class="text-caption-sm text-mute">
+          Seed paths are where a crawl starts; this is how far it may go. One path prefix per line:
+          "Discover URLs" and the ZAP frontend spider then only follow URLs under these prefixes
+          (plus the API base URL and the seed pages themselves), and katana is told the same scope.
+          An API outside the prefixes, e.g. "/api/…", is not included on its own — add it as a line
+          or set it as the API base URL.
         </p>
       </div>
 

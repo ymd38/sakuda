@@ -22,6 +22,7 @@ function siteFixture(overrides: Partial<SitePublic> = {}): SitePublic {
     openapiJson: null,
     zapFeSeedPath: '/',
     discoverySeedPaths: '',
+    crawlScopePaths: '',
     excludePaths: '',
     nucleiRateLimit: 50,
     zapApiMaxMinutes: 45,

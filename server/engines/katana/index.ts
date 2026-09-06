@@ -7,7 +7,9 @@ import { runCommand } from '../runCommand'
 import { EngineError, OOM_RUNBOOK, type DiscoverInput, type DiscoverOutput } from '../types'
 import { buildKatanaArgs, KATANA_MAX_DEPTH } from './args'
 import { dropKatanaArtifacts, parseKatanaJsonl } from './normalize'
+import { crawlScopePrefixes } from '#shared/utils/crawlScope'
 import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
+import { katanaScopeRegexes } from '../../domain/crawlScope'
 
 /** Sub-directory of the discovery work dir: katana's files must not collide
  * with ZAP's (`stdout.log`, `plan.yaml`, …) when both run in the same job. */
@@ -41,7 +43,17 @@ export async function runKatanaCrawl({
   const maxMinutes = site.zapFeSpiderMaxMinutes
   await mkdir(workDir, { recursive: true })
   await writeFile(seedsFile, seedUrls.join('\n') + '\n')
-  const args = buildKatanaArgs({ seedsFile, outputFile, maxMinutes, headers: site.headers })
+  const args = buildKatanaArgs({
+    seedsFile,
+    outputFile,
+    maxMinutes,
+    headers: site.headers,
+    crawlScopeRegexes: katanaScopeRegexes({
+      seedUrls,
+      front: rewriteLoopbackHost(site.frontBaseUrl + '/', env.localhostAlias).replace(/\/$/, ''),
+      prefixes: crawlScopePrefixes(site.crawlScopePaths),
+    }),
+  })
   logger.info(
     { discoveryId, engine: 'katana', seedPaths, maxMinutes, headerNames: site.headerNames },
     'katana start',

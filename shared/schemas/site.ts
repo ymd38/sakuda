@@ -4,6 +4,7 @@ import { BrowserStorageSchema } from './browserStorage'
 import { HeaderPatchesSchema, HeadersSchema } from './headers'
 import { siteRequiresConfirmation } from '../utils/localHost'
 import { parseNucleiPathLines } from '../utils/nucleiPaths'
+import { parseCrawlScopeLines } from '../utils/crawlScope'
 import { parseSeedPathLines } from '../utils/seedPaths'
 
 /** Upper bound of the saved target list; `addSiteTargets` enforces the same
@@ -30,6 +31,10 @@ const SiteFieldsSchema = z.object({
     .default('/'),
   /** Discovery crawl seeds, one path per line; empty → `zapFeSeedPath`. */
   discoverySeedPaths: z.string().max(5_000).default(''),
+  /** Path prefixes the crawls (discovery, zap-fe) may follow, one per line;
+   * empty → the whole origin. Seeds are start points, this is the range —
+   * see `server/domain/crawlScope`. */
+  crawlScopePaths: z.string().max(5_000).default(''),
   excludePaths: z.string().max(5_000).default(''),
   nucleiRateLimit: z.number().int().min(1).max(1000).default(50),
   zapApiMaxMinutes: z.number().int().min(1).max(600).default(45),
@@ -56,6 +61,8 @@ function refineSiteFields(v: Omit<SiteFields, 'headers'>, ctx: z.RefinementCtx) 
   for (const e of parsed.errors) ctx.addIssue({ code: 'custom', path: ['nucleiPaths'], message: e })
   for (const e of parseSeedPathLines(v.discoverySeedPaths).errors)
     ctx.addIssue({ code: 'custom', path: ['discoverySeedPaths'], message: e })
+  for (const e of parseCrawlScopeLines(v.crawlScopePaths).errors)
+    ctx.addIssue({ code: 'custom', path: ['crawlScopePaths'], message: e })
   if (!v.apiBaseUrl && parsed.lines.some((l) => l.base === 'api')) {
     ctx.addIssue({
       code: 'custom',

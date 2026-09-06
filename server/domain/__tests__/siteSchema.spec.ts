@@ -62,6 +62,20 @@ describe('SiteInputSchema', () => {
     expect(result.data.apiBaseUrl).toBe('http://localhost:8080')
   })
 
+  it('validates crawlScopePaths per line (path prefixes only) and defaults it to empty', () => {
+    const ok = SiteInputSchema.safeParse({ ...minimal, crawlScopePaths: '# api\n/rest/\n/app' })
+    expect(ok.success && ok.data.crawlScopePaths).toBe('# api\n/rest/\n/app')
+    expect(SiteInputSchema.safeParse(minimal).success && 'ok').toBe('ok')
+    const issues = issuesFor({ ...minimal, crawlScopePaths: '/rest\nrest\n/search?q=a\n/#/app' })
+    expect(
+      issues.filter((i) => i.path.join('.') === 'crawlScopePaths').map((i) => i.message),
+    ).toEqual([
+      expect.stringContaining('line 2'),
+      expect.stringContaining('line 3'),
+      expect.stringContaining('line 4'),
+    ])
+  })
+
   it('requires apiBaseUrl when nucleiPaths has an "api:" line', () => {
     const issues = issuesFor({ ...minimal, nucleiPaths: 'api:/v1/users' })
     expect(issues.some((i) => i.path.join('.') === 'apiBaseUrl')).toBe(true)

@@ -1,9 +1,13 @@
+import {
+  isUrlInCrawlScope,
+  resolveCrawlScope,
+  type CrawlScope,
+  type CrawlScopeSiteFields,
+} from './crawlScope'
 import { parseExcludePatterns, pathMatchesAny, SCAN_NOISE_GLOBS } from './excludePaths'
 
 /** The subset of a site a crawl result is filtered against. */
-export interface CrawlScopeSite {
-  frontBaseUrl: string
-  apiBaseUrl: string | null
+export interface CrawlScopeSite extends CrawlScopeSiteFields {
   excludePaths: string
 }
 
@@ -90,7 +94,8 @@ function isNoise(pathname: string): boolean {
   return pathMatchesAny(lower, SCAN_NOISE_GLOBS) || STACK_TRACE_SUFFIX.test(lower)
 }
 
-export type CrawledUrlDropReason = 'invalid' | 'sameOriginOnly' | 'asset' | 'noise' | 'excluded'
+export type CrawledUrlDropReason =
+  'invalid' | 'sameOriginOnly' | 'outOfScope' | 'asset' | 'noise' | 'excluded'
 
 export type CrawledUrlClassification =
   { kind: 'ok'; url: string } | { kind: 'dropped'; reason: CrawledUrlDropReason }
@@ -105,16 +110,22 @@ function allowedOrigins(site: CrawlScopeSite): Set<string> {
 
 /** Decides whether one crawler-discovered URL belongs in the site's target
  * set. Fragments are stripped (they never reach the server). Never throws —
- * an unparsable URL is classified as dropped rather than propagated. */
+ * an unparsable URL is classified as dropped rather than propagated. The
+ * crawl scope (see `crawlScope`) is checked right after the origin: ZAP and
+ * katana are told the same scope, so this is the count of what they still
+ * fetched outside it (their seeds' neighbours, a redirect), not the filter
+ * that enforces it. */
 export function classifyCrawledUrl(
   site: CrawlScopeSite,
   raw: string,
   patterns: string[] = parseExcludePatterns(site.excludePaths),
+  scope: CrawlScope | null = resolveCrawlScope(site),
 ): CrawledUrlClassification {
   if (!URL.canParse(raw)) return { kind: 'dropped', reason: 'invalid' }
   const u = new URL(raw)
   u.hash = ''
   if (!allowedOrigins(site).has(u.origin)) return { kind: 'dropped', reason: 'sameOriginOnly' }
+  if (!isUrlInCrawlScope(scope, u.toString())) return { kind: 'dropped', reason: 'outOfScope' }
   if (isAsset(u.pathname)) return { kind: 'dropped', reason: 'asset' }
   if (isNoise(u.pathname)) return { kind: 'dropped', reason: 'noise' }
   if (pathMatchesAny(u.pathname, patterns)) return { kind: 'dropped', reason: 'excluded' }
@@ -129,6 +140,7 @@ export interface CrawledUrlsDropped extends Record<CrawledUrlDropReason, number>
 export const emptyCrawledUrlsDropped = (): CrawledUrlsDropped => ({
   invalid: 0,
   sameOriginOnly: 0,
+  outOfScope: 0,
   asset: 0,
   noise: 0,
   excluded: 0,
@@ -153,11 +165,12 @@ export function normalizeCrawledEntries<T>(
 ): { kept: Array<{ url: string; entry: T }>; dropped: CrawledUrlsDropped } {
   const maxUrls = opts?.maxUrls ?? DEFAULT_MAX_DISCOVERED_URLS
   const patterns = parseExcludePatterns(site.excludePaths)
+  const scope = resolveCrawlScope(site)
   const dropped = emptyCrawledUrlsDropped()
   const seen = new Set<string>()
   const kept: Array<{ url: string; entry: T }> = []
   for (const entry of entries) {
-    const c = classifyCrawledUrl(site, urlOf(entry), patterns)
+    const c = classifyCrawledUrl(site, urlOf(entry), patterns, scope)
     if (c.kind === 'dropped') {
       dropped[c.reason]++
       continue

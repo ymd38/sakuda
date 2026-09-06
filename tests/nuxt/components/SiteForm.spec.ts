@@ -20,6 +20,7 @@ const editSite: SitePublic = {
   openapiJson: null,
   zapFeSeedPath: '/',
   discoverySeedPaths: '',
+  crawlScopePaths: '',
   excludePaths: '',
   nucleiRateLimit: 50,
   zapApiMaxMinutes: 45,
@@ -316,6 +317,7 @@ describe('SiteForm', () => {
     await wrapper.find('[data-testid="name"]').setValue('Shop')
     await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:4001')
     await wrapper.find('[data-testid="discovery-seed-paths"]').setValue('/#/\n/#/basket')
+    await wrapper.find('[data-testid="crawl-scope-paths"]').setValue('/rest\n/api')
 
     await wrapper.find('[data-testid="add-storage"]').trigger('click')
     await wrapper.find('[data-testid="add-storage"]').trigger('click')
@@ -330,6 +332,7 @@ describe('SiteForm', () => {
 
     const payload = emittedSubmit(wrapper)
     expect(payload.discoverySeedPaths).toBe('/#/\n/#/basket')
+    expect(payload.crawlScopePaths).toBe('/rest\n/api')
     expect(payload.browserStorage).toEqual([{ kind: 'sessionStorage', name: 'bid', value: '6' }])
   })
 
@@ -393,6 +396,7 @@ describe('SiteForm', () => {
     expect(within('section-nuclei', 'nuclei-paths')).toBe(true)
     expect(within('section-nuclei', 'risk-tag-fuzz')).toBe(true)
     expect(within('section-zap-fe', 'discovery-seed-paths')).toBe(true)
+    expect(within('section-zap-fe', 'crawl-scope-paths')).toBe(true)
     expect(within('section-zap-fe', 'add-storage')).toBe(true)
     expect(within('section-zap-api', 'openapi-json')).toBe(true)
     expect(within('section-zap-api', 'zap-api-max-minutes')).toBe(true)

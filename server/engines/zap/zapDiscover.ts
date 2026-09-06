@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { isApiCall, normalizeCrawledEntries, spaLikelyDidNotStart } from '../../domain/crawledUrls'
-import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
+import { zapScopeContext } from '../../domain/crawlScope'
+import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { EngineError, OOM_RUNBOOK, type DiscoverRunner } from '../types'
 import {
@@ -22,6 +23,7 @@ import {
   SITE_TREE_DUMP_SCRIPT_FILE,
   SITE_TREE_DUMP_SCRIPT_NAME,
 } from './siteTreeDump'
+import { crawlScopePrefixes } from '#shared/utils/crawlScope'
 import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
 
 /**
@@ -49,14 +51,17 @@ export const runZapDiscover: DiscoverRunner = async ({
   const seedUrls = seedPaths.map((p) => joinUrl(front, p))
   const excludeRegexes = zapExcludeRegexes(site.excludePaths)
   const origins = [front, ...(api ? [api] : [])]
+  // Both origins whole, or — with a crawl scope — the prefixes on the
+  // front, the API subtree and the seeds themselves (see domain/crawlScope).
+  const scope = zapScopeContext({
+    seedUrls,
+    front,
+    api,
+    prefixes: crawlScopePrefixes(site.crawlScopePaths),
+  })
   const hasBrowserStorage = site.browserStorage.length > 0
   const plan = buildZapDiscoverPlan({
-    context: {
-      name: 'sakuda',
-      urls: seedUrls,
-      includePaths: origins.map((b) => `^${escapeRegex(b)}(/.*)?$`),
-      excludePaths: excludeRegexes,
-    },
+    context: { name: 'sakuda', ...scope, excludePaths: excludeRegexes },
     seedUrls,
     ...(hasBrowserStorage
       ? {

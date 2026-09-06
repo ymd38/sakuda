@@ -24,6 +24,8 @@ export interface SitePublic {
   openapiJson: string | null
   zapFeSeedPath: string
   discoverySeedPaths: string
+  /** Crawl range as path prefixes (one per line); '' = whole origin. */
+  crawlScopePaths: string
   excludePaths: string
   nucleiRateLimit: number
   zapApiMaxMinutes: number

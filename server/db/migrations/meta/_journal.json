@@ -36,6 +36,13 @@
       "when": 1788326354091,
       "tag": "0004_nuclei_risk_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788631702266,
+      "tag": "0005_crawl_scope_paths",
+      "breakpoints": true
     }
   ]
 }

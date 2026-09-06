@@ -11,6 +11,9 @@ const site: CrawlScopeSite = {
   frontBaseUrl: 'http://localhost:3000',
   apiBaseUrl: 'http://localhost:8080',
   excludePaths: '',
+  crawlScopePaths: '',
+  discoverySeedPaths: '',
+  zapFeSeedPath: '/',
 }
 
 describe('classifyCrawledUrl', () => {
@@ -43,6 +46,27 @@ describe('classifyCrawledUrl', () => {
     expect(
       classifyCrawledUrl({ ...site, excludePaths: '/admin/*' }, 'http://localhost:3000/admin/x'),
     ).toEqual({ kind: 'dropped', reason: 'excluded' })
+  })
+
+  it('drops front-origin URLs outside the crawl scope, keeping the api subtree and the seeds', () => {
+    const scoped = { ...site, crawlScopePaths: '/rest', zapFeSeedPath: '/#/' }
+    expect(classifyCrawledUrl(scoped, 'http://localhost:3000/rest/basket/6')).toEqual({
+      kind: 'ok',
+      url: 'http://localhost:3000/rest/basket/6',
+    })
+    expect(classifyCrawledUrl(scoped, 'http://localhost:3000/ftp')).toEqual({
+      kind: 'dropped',
+      reason: 'outOfScope',
+    })
+    // the seed `/#/` is `/` to the server: allowed; its neighbours are not
+    expect(classifyCrawledUrl(scoped, 'http://localhost:3000/#/basket').kind).toBe('ok')
+    expect(classifyCrawledUrl(scoped, 'http://localhost:3000/about').kind).toBe('dropped')
+    expect(classifyCrawledUrl(scoped, 'http://localhost:8080/v1/users').kind).toBe('ok')
+    // scope is checked before the asset / noise / exclude rules
+    expect(classifyCrawledUrl(scoped, 'http://localhost:3000/app.js')).toEqual({
+      kind: 'dropped',
+      reason: 'outOfScope',
+    })
   })
 
   it('drops socket.io transport URLs and stack-trace pseudo-paths as noise', () => {
@@ -84,6 +108,7 @@ describe('normalizeCrawledUrls', () => {
     expect(dropped).toEqual({
       invalid: 1,
       sameOriginOnly: 1,
+      outOfScope: 0,
       asset: 1,
       noise: 1,
       excluded: 1,
@@ -101,7 +126,15 @@ describe('normalizeCrawledUrls', () => {
   it('returns an empty list with zero drops for empty input', () => {
     expect(normalizeCrawledUrls(site, [])).toEqual({
       urls: [],
-      dropped: { invalid: 0, sameOriginOnly: 0, asset: 0, noise: 0, excluded: 0, capped: 0 },
+      dropped: {
+        invalid: 0,
+        sameOriginOnly: 0,
+        outOfScope: 0,
+        asset: 0,
+        noise: 0,
+        excluded: 0,
+        capped: 0,
+      },
     })
   })
 })

@@ -19,6 +19,7 @@ function site(id: string, name: string) {
       openapiJson: null,
       zapFeSeedPath: '/',
       discoverySeedPaths: '',
+      crawlScopePaths: '',
       excludePaths: '',
       nucleiRateLimit: 50,
       zapApiMaxMinutes: 45,

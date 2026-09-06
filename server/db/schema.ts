@@ -18,6 +18,7 @@ export const sites = sqliteTable('sites', {
   openapiJson: text('openapi_json'),
   zapFeSeedPath: text('zap_fe_seed_path').notNull(),
   discoverySeedPaths: text('discovery_seed_paths').notNull().default(''),
+  crawlScopePaths: text('crawl_scope_paths').notNull().default(''),
   excludePaths: text('exclude_paths').notNull(),
   nucleiRateLimit: integer('nuclei_rate_limit').notNull(),
   zapApiMaxMinutes: integer('zap_api_max_minutes').notNull(),
