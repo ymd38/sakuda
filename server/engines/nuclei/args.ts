@@ -9,10 +9,6 @@ export interface NucleiArgsInput {
   concurrency: number
   tags: string[]
   headers: Header[]
-  /** Set only when active checks are enabled (see `domain/activeScan`):
-   * loads the DAST (fuzzing) template tree next to the signature templates
-   * and passes `-dast`, without which nuclei skips every fuzzing template. */
-  dastTemplatesDir?: string
   /** `-exclude-tags` value; defaults to all three risk tags. The caller
    * passes a shorter list only when a site opted a risk group back in
    * (see `domain/activeScan` `riskExcludeTags`). */
@@ -29,20 +25,77 @@ export function nucleiTagsFor(hasHeaders: boolean): string[] {
   return hasHeaders ? [...NUCLEI_BASE_TAGS, 'auth-bypass'] : [...NUCLEI_BASE_TAGS]
 }
 
+/**
+ * Args for the signature phase: the `http` template tree against the GET
+ * target list, in both passive and active mode. Never `-dast` — nuclei
+ * treats that flag as "run DAST templates only", so passing it here would
+ * silently drop every signature template (#65); the DAST tree gets its own
+ * run via {@link buildNucleiDastArgs}. Active mode only changes the tag
+ * lists (risk groups opted back in), which apply to the signature tree too.
+ */
 export function buildNucleiArgs(i: NucleiArgsInput): string[] {
   return [
     '-l',
     i.targetsFile,
     '-t',
     i.templatesDir,
-    ...(i.dastTemplatesDir ? ['-t', i.dastTemplatesDir] : []),
     '-tags',
     i.tags.join(','),
     '-severity',
     'critical,high,medium',
     '-exclude-tags',
     (i.excludeTags ?? NUCLEI_RISK_EXCLUDE_TAGS).join(','),
-    ...(i.dastTemplatesDir ? ['-dast'] : []),
+    '-rate-limit',
+    String(i.rateLimit),
+    '-c',
+    String(i.concurrency),
+    '-jsonl',
+    '-o',
+    i.outputFile,
+    '-stats-json',
+    '-si',
+    '5',
+    '-duc',
+    '-nc',
+    '-omit-raw',
+    ...headersToHeaderArgs(i.headers),
+  ]
+}
+
+export interface NucleiDastArgsInput {
+  targetsFile: string
+  /** DAST (fuzzing) template tree only; the signature tree has its own run. */
+  dastTemplatesDir: string
+  outputFile: string
+  rateLimit: number
+  concurrency: number
+  /** Same lists as the signature phase (risk groups included), so a risk
+   * opt-in gates the DAST templates exactly as it did before the split. */
+  tags: string[]
+  excludeTags: string[]
+  headers: Header[]
+}
+
+/**
+ * Args for the active GET DAST phase (#65): the same target list as the
+ * signature phase, but only the DAST tree with `-dast`, which is what makes
+ * nuclei execute fuzzing templates at all. Tag filters are shared with the
+ * signature phase so the template set equals what the single active run
+ * used to execute before the split.
+ */
+export function buildNucleiDastArgs(i: NucleiDastArgsInput): string[] {
+  return [
+    '-l',
+    i.targetsFile,
+    '-t',
+    i.dastTemplatesDir,
+    '-dast',
+    '-tags',
+    i.tags.join(','),
+    '-severity',
+    'critical,high,medium',
+    '-exclude-tags',
+    i.excludeTags.join(','),
     '-rate-limit',
     String(i.rateLimit),
     '-c',

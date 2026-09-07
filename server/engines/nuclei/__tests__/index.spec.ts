@@ -284,8 +284,8 @@ describe('runNuclei', () => {
     expect(out.meta.skippedNoFuzzSeed).toEqual({ POST: 1 })
     // active run: nothing is in the "not attempted at all" bucket.
     expect(out.meta.skippedMethods).toBeUndefined()
-    // both phases produced a finding via the fake binary
-    expect(out.counts.high).toBe(2)
+    // every phase produced a finding via the fake binary: signature + GET DAST + OpenAPI
+    expect(out.counts.high).toBe(3)
     // the GET phase's transient targets file seeded the empty query
     expect(readFileSync(join(workDir, 'targets.txt'), 'utf8')).toContain('/get?q=1')
     // the generated OpenAPI doc and its outputs are removed after the run
@@ -314,14 +314,46 @@ describe('runNuclei', () => {
   })
 })
 
-// Records argv next to the output file so a test can assert on the exact
-// flags the engine passed, then behaves like FAKE_SUCCESS.
+// Records argv next to the output file — one file per phase, named after
+// the phase's output (`argv-findings.jsonl.json`, `argv-dast-findings.jsonl.json`)
+// so a test can assert on the exact flags of each nuclei run — then behaves
+// like FAKE_SUCCESS without findings.
 const FAKE_RECORD_ARGS = `#!/usr/bin/env node
 const fs = require('node:fs')
 const path = require('node:path')
 const args = process.argv.slice(2)
 const outFile = args[args.indexOf('-o') + 1]
-fs.writeFileSync(path.join(path.dirname(outFile), 'argv.json'), JSON.stringify(args))
+fs.writeFileSync(path.join(path.dirname(outFile), 'argv-' + path.basename(outFile) + '.json'), JSON.stringify(args))
+fs.writeFileSync(outFile, '')
+console.log(JSON.stringify({ requests: '10', errors: '0' }))
+process.exit(0)
+`
+
+// Like FAKE_SUCCESS (one "high" finding per run) but exits 2 with no output
+// when invoked as the GET DAST phase (`-dast` without `-im`).
+const FAKE_DAST_PHASE_FAILS = `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+const outFile = args[args.indexOf('-o') + 1]
+if (args.includes('-dast') && !args.includes('-im')) process.exit(2)
+const finding = {
+  'template-id': 'fake-high',
+  info: { name: 'Fake High', severity: 'high' },
+  host: 'localhost:3001',
+  'matched-at': 'http://localhost:3001/a',
+}
+fs.writeFileSync(outFile, JSON.stringify(finding) + '\\n')
+console.log(JSON.stringify({ requests: '10', errors: '0' }))
+process.exit(0)
+`
+
+// The GET DAST phase exits 2 with no output; every other run completes
+// cleanly with no findings (an "empty" phase, not a failed one).
+const FAKE_DAST_FAILS_OTHERS_EMPTY = `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+const outFile = args[args.indexOf('-o') + 1]
+if (args.includes('-dast') && !args.includes('-im')) process.exit(2)
 fs.writeFileSync(outFile, '')
 console.log(JSON.stringify({ requests: '10', errors: '0' }))
 process.exit(0)
@@ -335,8 +367,8 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     tmp = mkdtempSync(join(tmpdir(), 'sakuda-nuclei-dast-'))
   })
 
-  async function run(site: SiteWithHeaders) {
-    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_RECORD_ARGS)
+  async function run(site: SiteWithHeaders, fake = FAKE_RECORD_ARGS) {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', fake)
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
@@ -354,17 +386,24 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
       logger,
       signal: new AbortController().signal,
     })
-    // as: argv.json is written by the fake binary above as a JSON string[]
-    const argv = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8')) as string[]
-    return { out, argv }
+    // as: the argv files are written by the fake binary above as JSON string[]
+    const argvOf = (output: string): string[] | null => {
+      const p = join(workDir, `argv-${output}.json`)
+      return existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as string[]) : null
+    }
+    // signature phase = `findings.jsonl`; GET DAST phase = `dast-findings.jsonl`
+    return { out, argv: argvOf('findings.jsonl')!, dastArgv: argvOf('dast-findings.jsonl') }
   }
 
-  it('passes neither -dast nor the DAST template dir when the site is not opted in', async () => {
-    const { out, argv } = await run(baseSite({ nucleiPaths: '/search?q=' }))
+  it('runs the signature phase only, never -dast, when the site is not opted in', async () => {
+    const { out, argv, dastArgv } = await run(baseSite({ nucleiPaths: '/search?q=' }))
     expect(argv).not.toContain('-dast')
     expect(argv).not.toContain('/tpl/dast')
+    expect(dastArgv).toBeNull()
     expect(out.meta.activeScan).toBe(false)
     expect(out.meta.dastTemplatesDir).toBeUndefined()
+    expect(out.meta.signaturePhase).toBe('empty')
+    expect(out.meta.dastPhase).toBe('skipped')
     expect(out.warnings).toEqual([])
   })
 
@@ -386,32 +425,75 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     expect(targets).not.toContain('#')
   })
 
-  it('passes -dast and the DAST template dir when the site is opted in', async () => {
-    const { out, argv } = await run(
+  it('under active checks runs two GET phases: signature (http tree, no -dast) then DAST (dast tree, -dast)', async () => {
+    const { out, argv, dastArgv } = await run(
       baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=\n/plain' }),
     )
-    expect(argv).toContain('-dast')
-    expect(argv.slice(argv.indexOf('-t'), argv.indexOf('-t') + 4)).toEqual([
-      '-t',
-      '/tpl/http',
-      '-t',
-      '/tpl/dast',
-    ])
+    // signature phase: the http tree only, and never -dast (it would drop every signature template)
+    expect(argv).not.toContain('-dast')
+    expect(argv.filter((a) => a === '-t')).toHaveLength(1)
+    expect(argv[argv.indexOf('-t') + 1]).toBe('/tpl/http')
+    // DAST phase: the dast tree only, with -dast, against the same targets file
+    expect(dastArgv).not.toBeNull()
+    expect(dastArgv).toContain('-dast')
+    expect(dastArgv!.filter((a) => a === '-t')).toHaveLength(1)
+    expect(dastArgv![dastArgv!.indexOf('-t') + 1]).toBe('/tpl/dast')
+    expect(dastArgv![dastArgv!.indexOf('-l') + 1]).toBe(argv[argv.indexOf('-l') + 1])
     expect(out.meta.activeScan).toBe(true)
     expect(out.meta.dastTemplatesDir).toBe('/tpl/dast')
+    expect(out.meta.signaturePhase).toBe('empty')
+    expect(out.meta.dastPhase).toBe('empty')
     expect(out.meta.parameterizedUrlCount).toBe(1)
     expect(out.warnings).toEqual([])
   })
 
-  it('opts a risk group back in: -exclude-tags drops it and -tags gains its extra tags', async () => {
-    const { argv } = await run(
+  it('opts a risk group back in: both GET phases drop it from -exclude-tags and gain its extra -tags', async () => {
+    const { argv, dastArgv } = await run(
       baseSite({ allowMutatingRequests: true, nucleiEnabledRiskTags: ['fuzz'] }),
     )
-    const exclude = argv[argv.indexOf('-exclude-tags') + 1]
-    const tags = argv[argv.indexOf('-tags') + 1]
-    expect(exclude).toBe('dos,intrusive')
-    expect(tags).toContain('cmdi')
-    expect(tags).toContain('rce')
+    for (const a of [argv, dastArgv!]) {
+      expect(a[a.indexOf('-exclude-tags') + 1]).toBe('dos,intrusive')
+      expect(a[a.indexOf('-tags') + 1]).toContain('cmdi')
+      expect(a[a.indexOf('-tags') + 1]).toContain('rce')
+    }
+    expect(dastArgv![dastArgv!.indexOf('-tags') + 1]).toBe(argv[argv.indexOf('-tags') + 1])
+  })
+
+  it('merges the findings of both GET phases', async () => {
+    const { out } = await run(
+      baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=' }),
+      FAKE_SUCCESS,
+    )
+    // one fake "high" per nuclei run: signature + DAST
+    expect(out.counts.high).toBe(2)
+    expect(out.findings).toHaveLength(2)
+    expect(out.meta.signaturePhase).toBe('ok')
+    expect(out.meta.dastPhase).toBe('ok')
+    expect(out.exitCode).toBe(0)
+  })
+
+  it('keeps the signature findings and warns when the DAST phase fails', async () => {
+    const { out } = await run(
+      baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=' }),
+      FAKE_DAST_PHASE_FAILS,
+    )
+    expect(out.counts.high).toBe(1)
+    expect(out.meta.signaturePhase).toBe('ok')
+    expect(out.meta.dastPhase).toBe('failed')
+    expect(out.exitCode).toBe(1)
+    expect(out.warnings).toEqual([expect.stringMatching(/nuclei DAST phase failed/)])
+  })
+
+  it('does not report "every phase failed" when the signature phase completed empty and only the DAST phase failed', async () => {
+    const { out } = await run(
+      baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=' }),
+      FAKE_DAST_FAILS_OTHERS_EMPTY,
+    )
+    expect(out.counts.high).toBe(0)
+    expect(out.meta.signaturePhase).toBe('empty')
+    expect(out.meta.dastPhase).toBe('failed')
+    expect(out.exitCode).toBe(1)
+    expect(out.warnings).toEqual([expect.stringMatching(/nuclei DAST phase failed/)])
   })
 
   it('ignores selected risk tags while the opt-in is off (exclusion stays full)', async () => {
@@ -421,8 +503,8 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
   })
 
   it('warns when opted in but no saved target carries query parameters', async () => {
-    const { out, argv } = await run(baseSite({ allowMutatingRequests: true }))
-    expect(argv).toContain('-dast')
+    const { out, dastArgv } = await run(baseSite({ allowMutatingRequests: true }))
+    expect(dastArgv).toContain('-dast')
     expect(out.meta.parameterizedUrlCount).toBe(0)
     expect(out.warnings).toEqual([expect.stringMatching(/no saved target has query parameters/)])
   })
@@ -439,5 +521,6 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     )
     expect(argv).not.toContain('-dast')
     expect(out.meta.activeScan).toBe(false)
+    expect(out.meta.dastPhase).toBe('skipped')
   })
 })

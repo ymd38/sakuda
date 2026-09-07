@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildNucleiArgs, buildNucleiOpenapiArgs, NUCLEI_BASE_TAGS, nucleiTagsFor } from '../args'
+import {
+  buildNucleiArgs,
+  buildNucleiDastArgs,
+  buildNucleiOpenapiArgs,
+  NUCLEI_BASE_TAGS,
+  nucleiTagsFor,
+} from '../args'
 
 describe('nucleiTagsFor', () => {
   it('returns the base tags when unauthenticated', () => {
@@ -68,33 +74,74 @@ describe('buildNucleiArgs', () => {
   })
 })
 
-describe('buildNucleiArgs with active checks (dastTemplatesDir)', () => {
+describe('buildNucleiDastArgs (the active GET DAST phase)', () => {
   const base = {
     targetsFile: 't.txt',
-    templatesDir: '/tpl/http',
-    outputFile: 'o.jsonl',
+    dastTemplatesDir: '/tpl/dast',
+    outputFile: 'dast.jsonl',
     rateLimit: 50,
     concurrency: 25,
-    tags: ['sqli'],
-    headers: [],
+    tags: ['sqli', 'cmdi'],
+    excludeTags: ['dos', 'intrusive'],
+    headers: [{ name: 'Cookie', value: 'a=b' }],
   }
 
-  it('adds the DAST template tree as a second -t and the -dast flag', () => {
-    const args = buildNucleiArgs({ ...base, dastTemplatesDir: '/tpl/dast' })
-    expect(args.slice(0, 6)).toEqual(['-l', 't.txt', '-t', '/tpl/http', '-t', '/tpl/dast'])
-    expect(args).toContain('-dast')
-    // the risk exclusions stay in place even in active mode
-    expect(args.slice(args.indexOf('-exclude-tags'), args.indexOf('-exclude-tags') + 3)).toEqual([
-      '-exclude-tags',
-      'dos,fuzz,intrusive',
+  it('loads only the DAST tree with -dast and the same tag filters as the signature phase', () => {
+    expect(buildNucleiDastArgs(base)).toEqual([
+      '-l',
+      't.txt',
+      '-t',
+      '/tpl/dast',
       '-dast',
+      '-tags',
+      'sqli,cmdi',
+      '-severity',
+      'critical,high,medium',
+      '-exclude-tags',
+      'dos,intrusive',
+      '-rate-limit',
+      '50',
+      '-c',
+      '25',
+      '-jsonl',
+      '-o',
+      'dast.jsonl',
+      '-stats-json',
+      '-si',
+      '5',
+      '-duc',
+      '-nc',
+      '-omit-raw',
+      '-H',
+      'Cookie: a=b',
     ])
   })
 
-  it('is byte-for-byte the passive argument list when dastTemplatesDir is absent', () => {
-    expect(buildNucleiArgs({ ...base, dastTemplatesDir: undefined })).toEqual(buildNucleiArgs(base))
-    expect(buildNucleiArgs(base)).not.toContain('-dast')
-    expect(buildNucleiArgs(base).filter((a) => a === '-t')).toHaveLength(1)
+  it('never loads the signature tree: -dast would silence it (nuclei runs DAST templates only)', () => {
+    const args = buildNucleiDastArgs(base)
+    expect(args.filter((a) => a === '-t')).toHaveLength(1)
+    expect(args).not.toContain('/tpl/http')
+  })
+})
+
+describe('buildNucleiArgs is the signature phase in both modes', () => {
+  it('never passes -dast, which would drop every signature template', () => {
+    const args = buildNucleiArgs({
+      targetsFile: 't.txt',
+      templatesDir: '/tpl/http',
+      outputFile: 'o.jsonl',
+      rateLimit: 50,
+      concurrency: 25,
+      tags: ['sqli', 'cmdi'],
+      excludeTags: ['dos'],
+      headers: [],
+    })
+    expect(args).not.toContain('-dast')
+    expect(args.filter((a) => a === '-t')).toHaveLength(1)
+    expect(args.slice(args.indexOf('-exclude-tags'), args.indexOf('-exclude-tags') + 2)).toEqual([
+      '-exclude-tags',
+      'dos',
+    ])
   })
 })
 

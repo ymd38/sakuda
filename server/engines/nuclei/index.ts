@@ -22,7 +22,7 @@ import {
   type EngineRunner,
   type NewFinding,
 } from '../types'
-import { buildNucleiArgs, buildNucleiOpenapiArgs, nucleiTagsFor } from './args'
+import { buildNucleiArgs, buildNucleiDastArgs, buildNucleiOpenapiArgs, nucleiTagsFor } from './args'
 import {
   normalizeNucleiLines,
   parseNucleiJsonl,
@@ -43,6 +43,10 @@ interface PhaseOutcome {
   stats: NucleiStats | null
   invalidLines: number
 }
+
+/** What a GET phase did, for `meta`: `skipped` = not attempted (the DAST
+ * phase on a passive run, or no GET targets). */
+type GetPhaseStatus = PhaseOutcome['status'] | 'skipped'
 
 function addCounts(into: SeverityCounts, from: SeverityCounts): void {
   for (const k of Object.keys(into) as (keyof SeverityCounts)[]) into[k] += from[k]
@@ -113,14 +117,47 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   const warnings: string[] = []
   let anyFailed = false
   let anyRan = false
+  // A phase that ran to completion, findings or not: "every phase failed"
+  // must not be inferred from an empty finding count, since a clean phase
+  // with nothing to report looks the same there.
+  let anyCompleted = false
   let anAborted = false
   let anOom = false
   let timedOut = false
   let getStats: NucleiStats | null = null
+  let dastStats: NucleiStats | null = null
+  let signaturePhase: GetPhaseStatus = 'skipped'
+  let dastPhase: GetPhaseStatus = 'skipped'
+  const unaliasFront = (u: string) =>
+    restoreLoopbackHost(u, localAlias, new URL(site.frontBaseUrl).hostname)
 
-  // --- phase 1: GET URL list (signature + DAST templates) -----------------
+  // Folds one GET phase's outcome into the run: findings on success, a
+  // warning on failure, and the abort/OOM/timeout flags either way.
+  const absorb = (phase: PhaseOutcome, label: string, stderrPath: string): void => {
+    anyRan = true
+    if (phase.result.aborted) anAborted = true
+    if (phase.result.oomKilled) anOom = true
+    if (phase.result.timedOut) timedOut = true
+    if (phase.status === 'failed') {
+      anyFailed = true
+      warnings.push(
+        `nuclei ${label} phase failed (exit ${phase.result.code ?? 'null'}, signal ${phase.result.signal ?? 'none'}${phase.result.timedOut ? ', timed out' : ''}); see ${stderrPath}`,
+      )
+    } else {
+      anyCompleted = true
+      findings.push(...phase.findings)
+      addCounts(counts, phase.counts)
+    }
+    if (phase.invalidLines > 0)
+      warnings.push(`${phase.invalidLines} unparsable JSONL line(s) ignored (${label} phase)`)
+  }
+
+  // --- phase 1: GET URL list, signature templates (the `http` tree) --------
+  // Same argv in both modes except the tag lists; never `-dast`, which
+  // would make nuclei run DAST templates only and drop every signature
+  // template (#65).
+  const targetsFile = join(workDir, 'targets.txt')
   if (getUrls.length > 0) {
-    const targetsFile = join(workDir, 'targets.txt')
     const outputFile = join(workDir, 'findings.jsonl')
     const stdoutPath = join(workDir, 'stdout.log')
     const stderrPath = join(workDir, 'stderr.log')
@@ -138,7 +175,6 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       tags,
       headers: site.headers,
       excludeTags: riskExcludeTags(riskTags),
-      ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
     })
     const phase = await runNucleiPhase({
       label: `nuclei:${scanId}`,
@@ -151,25 +187,55 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       timeoutMs: Math.max(remaining(), MIN_PHASE_MS),
       signal,
       logger,
-      unalias: (u) => restoreLoopbackHost(u, localAlias, new URL(site.frontBaseUrl).hostname),
+      unalias: unaliasFront,
       readStats: true,
     })
-    anyRan = true
-    if (phase.result.aborted) anAborted = true
-    if (phase.result.oomKilled) anOom = true
-    if (phase.result.timedOut) timedOut = true
-    if (phase.status === 'failed') {
-      anyFailed = true
-      warnings.push(
-        `nuclei GET phase failed (exit ${phase.result.code ?? 'null'}, signal ${phase.result.signal ?? 'none'}${phase.result.timedOut ? ', timed out' : ''}); see ${stderrPath}`,
-      )
-    } else {
-      findings.push(...phase.findings)
-      addCounts(counts, phase.counts)
-    }
+    absorb(phase, 'signature', stderrPath)
+    signaturePhase = phase.status
     getStats = phase.stats
-    if (phase.invalidLines > 0)
-      warnings.push(`${phase.invalidLines} unparsable JSONL line(s) ignored`)
+  }
+
+  // --- phase 1b: the same GET list, DAST templates (active checks only) ----
+  // A separate nuclei run because `-dast` is exclusive; same targets file
+  // and tag lists as phase 1, so the risk opt-ins gate it identically.
+  if (activeScan && getUrls.length > 0 && !anAborted) {
+    if (remaining() <= 0) {
+      warnings.push(
+        'nuclei was stopped by the engine timeout before the DAST phase started; results are partial',
+      )
+      timedOut = true
+    } else {
+      const outputFile = join(workDir, 'dast-findings.jsonl')
+      const stdoutPath = join(workDir, 'dast-stdout.log')
+      const stderrPath = join(workDir, 'dast-stderr.log')
+      const args = buildNucleiDastArgs({
+        targetsFile,
+        dastTemplatesDir: env.nuclei.dastTemplatesDir,
+        outputFile,
+        rateLimit: site.nucleiRateLimit,
+        concurrency: 25,
+        tags,
+        excludeTags: riskExcludeTags(riskTags),
+        headers: site.headers,
+      })
+      const phase = await runNucleiPhase({
+        label: `nuclei-dast:${scanId}`,
+        cmd: env.nuclei.bin,
+        args,
+        workDir,
+        outputFile,
+        stdoutPath,
+        stderrPath,
+        timeoutMs: Math.max(remaining(), MIN_PHASE_MS),
+        signal,
+        logger,
+        unalias: unaliasFront,
+        readStats: true,
+      })
+      absorb(phase, 'DAST', stderrPath)
+      dastPhase = phase.status
+      dastStats = phase.stats
+    }
   }
 
   // --- phase 2: non-GET via generated OpenAPI (one nuclei run per doc) -----
@@ -228,6 +294,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
           `nuclei OpenAPI phase failed for one origin (exit ${phase.result.code ?? 'null'}, signal ${phase.result.signal ?? 'none'}${phase.result.timedOut ? ', timed out' : ''})`,
         )
       } else {
+        anyCompleted = true
         findings.push(...phase.findings)
         addCounts(counts, phase.counts)
       }
@@ -237,8 +304,10 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   }
 
   if (anAborted) throw new EngineError('nuclei aborted: server shutting down')
-  // Every attempted phase failed and nothing was produced → a real failure.
-  if (anyRan && anyFailed && sum(counts) === 0)
+  // Every attempted phase failed → a real failure. A phase that completed
+  // with no findings counts as success here, so a partial run is reported
+  // with warnings and exit 1 rather than thrown away.
+  if (anyRan && anyFailed && !anyCompleted)
     throw new EngineError(
       'nuclei produced no output; every phase failed — see the per-phase logs in the work dir',
       anOom ? OOM_RUNBOOK : undefined,
@@ -246,8 +315,10 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
 
   if (timedOut)
     warnings.push(`nuclei was stopped after ${env.nuclei.maxMinutes} min; results are partial`)
-  const req = Number(getStats?.requests ?? 0)
-  const errs = Number(getStats?.errors ?? 0)
+  // Error rate over both GET phases: they hit the same targets, so one
+  // rate-limit verdict covers them.
+  const req = Number(getStats?.requests ?? 0) + Number(dastStats?.requests ?? 0)
+  const errs = Number(getStats?.errors ?? 0) + Number(dastStats?.errors ?? 0)
   if (req > 0 && errs / req > 0.05)
     warnings.push(
       `error rate ${((errs / req) * 100).toFixed(1)}% (${errs}/${req}); coverage may be reduced — lower nucleiRateLimit`,
@@ -281,7 +352,10 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       riskTags,
       ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
       parameterizedUrlCount,
+      signaturePhase,
+      dastPhase,
       stats: getStats,
+      ...(dastStats ? { dastStats } : {}),
       timedOut,
     },
   }
@@ -296,10 +370,6 @@ function uniqueBy<T>(items: T[], keyOf: (item: T) => string): T[] {
     seen.add(key)
     return true
   })
-}
-
-function sum(c: SeverityCounts): number {
-  return c.critical + c.high + c.medium + c.low + c.info
 }
 
 interface PhaseInput {
