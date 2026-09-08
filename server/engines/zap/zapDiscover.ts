@@ -144,7 +144,10 @@ export const runZapDiscover: DiscoverRunner = async ({
     method: entry.method,
     statusCode: entry.status,
     source: historyTypeToSource(entry.type),
+    ...(entry.contentType ? { contentType: entry.contentType } : {}),
+    ...(entry.bodyShape ? { bodyShape: entry.bodyShape } : {}),
   }))
+  const bodyShapeCount = urls.filter((u) => u.bodyShape).length
   const authFailureCount = dump.entries.filter((e) => e.status === 401 || e.status === 403).length
   // Ajax-spider entries only — the ones a running SPA would have produced.
   const ajaxEntries = dump.entries.filter((e) => historyTypeToSource(e.type) === 'ajax')
@@ -163,9 +166,10 @@ export const runZapDiscover: DiscoverRunner = async ({
     warnings.push('ZAP was stopped by the engine timeout; the URL list may be partial')
   if (dump.invalidLines > 0)
     warnings.push(`${dump.invalidLines} unparsable line(s) in the site-tree dump were ignored`)
-  // Counts only: discovered URLs may carry query strings with sensitive values.
+  // Counts only: discovered URLs may carry query strings with sensitive values,
+  // and a body shape's field names are API structure — log how many, never which.
   logger.info(
-    { discoveryId, nodeCount: dump.entries.length, urlCount: urls.length, dropped },
+    { discoveryId, nodeCount: dump.entries.length, urlCount: urls.length, bodyShapeCount, dropped },
     'discovery done',
   )
   return {
@@ -181,6 +185,7 @@ export const runZapDiscover: DiscoverRunner = async ({
       nodeCount: dump.entries.length + dump.structuralCount,
       structuralCount: dump.structuralCount,
       urlCount: urls.length,
+      bodyShapeCount,
       dropped,
       authFailureCount,
       ajaxApiCallCount: ajaxEntries.filter((e) => isApiCall(e.method, e.url)).length,

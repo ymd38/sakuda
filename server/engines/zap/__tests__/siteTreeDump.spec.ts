@@ -23,6 +23,16 @@ describe('buildSiteTreeDumpScript', () => {
     const script = buildSiteTreeDumpScript('/tmp/a"b\\c/site-tree.jsonl')
     expect(script).toContain('Paths.get("/tmp/a\\"b\\\\c/site-tree.jsonl")')
   })
+
+  it('embeds the body-shape function and captures bodies for non-GET nodes only', () => {
+    const script = buildSiteTreeDumpScript('/zap/wrk/site-tree.jsonl')
+    // The tested shaping function is inlined, and the walk reads the request body
+    // only for non-GET/HEAD nodes (via getHttpMessage), writing shapes not values.
+    expect(script).toContain('var toBodyShape = ')
+    expect(script).toContain('getHttpMessage()')
+    expect(script).toContain("method !== 'GET' && method !== 'HEAD'")
+    expect(script).toContain('entry.bodyShape = shape')
+  })
 })
 
 describe('parseSiteTreeDump', () => {
@@ -51,6 +61,38 @@ describe('parseSiteTreeDump', () => {
 
   it('returns nothing for empty input', () => {
     expect(parseSiteTreeDump('')).toEqual({ entries: [], structuralCount: 0, invalidLines: 0 })
+  })
+
+  it('parses contentType + bodyShape when present and old lines without them still pass', () => {
+    const withShape = JSON.stringify({
+      method: 'POST',
+      url: 'http://h/rest/user/login',
+      type: 24,
+      status: 401,
+      contentType: 'application/json',
+      bodyShape: { kind: 'json', root: { type: 'object', fields: { email: { type: 'string' } } } },
+    })
+    const oldLine = JSON.stringify({ method: 'GET', url: 'http://h/', type: 2, status: 200 })
+    const { entries, invalidLines } = parseSiteTreeDump(`${withShape}\n${oldLine}\n`)
+    expect(invalidLines).toBe(0)
+    expect(entries).toHaveLength(2)
+    expect(entries[0]?.bodyShape).toEqual({
+      kind: 'json',
+      root: { type: 'object', fields: { email: { type: 'string' } } },
+    })
+    expect(entries[0]?.contentType).toBe('application/json')
+    expect(entries[1]?.bodyShape).toBeUndefined()
+  })
+
+  it('rejects a line whose bodyShape is structurally invalid', () => {
+    const bad = JSON.stringify({
+      method: 'POST',
+      url: 'http://h/x',
+      type: 24,
+      status: 200,
+      bodyShape: { kind: 'json', root: { type: 'not-a-type' } },
+    })
+    expect(parseSiteTreeDump(`${bad}\n`).invalidLines).toBe(1)
   })
 })
 

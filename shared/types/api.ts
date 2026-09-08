@@ -111,6 +111,25 @@ export interface HistoryPoint {
   engines: Partial<Record<Engine, SeverityCounts>>
   diff: { new: number; persisting: number; resolved: number } | null
 }
+/** The value-free shape of one JSON node: its type, plus (for containers)
+ * child field names / element shapes. Never a captured value — only names and
+ * type labels. A container nested past the depth cap keeps `truncated: true`
+ * and drops its children. */
+export interface JsonFieldShape {
+  type: 'string' | 'number' | 'boolean' | 'null' | 'object' | 'array'
+  /** object: field name → shape (absent when `truncated`). */
+  fields?: Record<string, JsonFieldShape>
+  /** array: the distinct element shapes (absent when `truncated`). */
+  items?: JsonFieldShape[]
+  /** A container deeper than the shape's depth cap: only its type is kept. */
+  truncated?: true
+}
+/** The value-free shape of a captured request body (see `bodyShape.ts`).
+ * `json` keeps key names + JSON types; `form` keeps field names; everything
+ * else (multipart, text, malformed) is `other`. No captured value is ever
+ * carried — field names are API contract, values are not stored. */
+export type BodyShape =
+  { kind: 'json'; root: JsonFieldShape } | { kind: 'form'; fields: string[] } | { kind: 'other' }
 /** One URL found by a discovery crawl, after normalization (same origin,
  * fragment stripped, assets/noise/excluded paths removed). */
 export interface DiscoveredUrl {
@@ -121,6 +140,10 @@ export interface DiscoveredUrl {
    * spider, ZAP's Client Spider (browser-driven form submission, active checks
    * only), katana's static JS-bundle crawl, or another ZAP history type. */
   source: 'spider' | 'ajax' | 'client' | 'katana' | 'other'
+  /** Request Content-Type observed for a non-GET body, if any. */
+  contentType?: string
+  /** Value-free shape of the request body, if the crawl captured one. */
+  bodyShape?: BodyShape
 }
 export type DiscoveryStatus = ScanStatus
 export interface DiscoverySummary {
