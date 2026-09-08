@@ -194,6 +194,25 @@ describe('DiscoveryPanel', () => {
     expect(posted).toEqual({ lines: ['POST /rest/x'] })
   })
 
+  it('shows the client source for a Client Spider row', async () => {
+    endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
+    endpoint('/api/discoveries/disc-1', () =>
+      detailFixture({
+        urls: [
+          {
+            url: 'http://localhost:4001/rest/user/login',
+            method: 'POST',
+            statusCode: 401,
+            source: 'client',
+          },
+        ],
+        warnings: [],
+      }),
+    )
+    const wrapper = await mountPanel()
+    expect(wrapper.find('[data-testid="discovered-url-source"]').text()).toBe('client')
+  })
+
   it('posts the selected lines plus manual lines, then emits the updated site', async () => {
     endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
     endpoint('/api/discoveries/disc-1', () => detailFixture())

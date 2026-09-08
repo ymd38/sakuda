@@ -78,6 +78,13 @@ export interface ZapDiscoverPlanInput {
    * false unless the site opted into active checks — a passive discovery must
    * not POST forms. `processForm` keeps its default (GET-form discovery). */
   postForms?: boolean
+  /** Active discovery (#70): also run ZAP's Client Spider (`spiderClient`,
+   * history type 24) once per seed. It drives a real browser and submits SPA
+   * forms with Form Handler values — the only crawler that observed Juice
+   * Shop's form-driven non-GET requests (research doc §1.2 Run 3). Form
+   * submission is mutating, so like `postForms` this is only set when the site
+   * opted into active checks. Absent/false → no spiderClient jobs. */
+  clientSpider?: boolean
 }
 
 export const ZAP_REPORT_JSON = 'report.json'
@@ -113,6 +120,24 @@ const ajaxSpiderJob = (contextName: string, url: string, maxDuration: number) =>
     maxDuration,
     numberOfBrowsers: 1,
     browserId: 'firefox-headless',
+  },
+})
+
+/** ZAP Client Spider (`spiderClient`, `client` add-on): a browser-driven
+ * crawl that fills and submits SPA forms via the Form Handler add-on, so
+ * form-driven non-GET requests land in the site tree (research doc §1.2 Run 3).
+ * `scopeCheck: Strict` keeps it inside the context — the Client Spider will
+ * otherwise follow off-origin links (Run 3 POSTed to collector.github.com).
+ * One browser, matching the Ajax spider's `numberOfBrowsers: 1` OOM budget. */
+const clientSpiderJob = (contextName: string, url: string, maxDuration: number) => ({
+  type: 'spiderClient',
+  parameters: {
+    context: contextName,
+    url,
+    maxDuration,
+    numberOfBrowsers: 1,
+    browserId: 'firefox-headless',
+    scopeCheck: 'Strict',
   },
 })
 
@@ -257,6 +282,11 @@ export function buildZapDiscoverPlan(i: ZapDiscoverPlanInput): Record<string, un
         },
       },
       ...i.seedUrls.map((url) => ajaxSpiderJob(i.context.name, url, i.ajaxMaxMinutes)),
+      // Client Spider per seed, active-checks only (see clientSpider) — after
+      // the other spiders so its browser-driven form submissions come last.
+      ...(i.clientSpider
+        ? i.seedUrls.map((url) => clientSpiderJob(i.context.name, url, i.spiderMaxMinutes))
+        : []),
       {
         type: 'script',
         parameters: {

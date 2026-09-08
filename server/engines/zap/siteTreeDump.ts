@@ -49,10 +49,12 @@ export type SiteTreeEntry = z.infer<typeof Entry>
 // org.parosproxy.paros.model.HistoryReference constants.
 const HISTORY_TYPE_SPIDER = 2
 const HISTORY_TYPE_SPIDER_AJAX = 10
+const HISTORY_TYPE_SPIDER_CLIENT = 24
 
 export function historyTypeToSource(type: number): DiscoveredUrl['source'] {
   if (type === HISTORY_TYPE_SPIDER) return 'spider'
   if (type === HISTORY_TYPE_SPIDER_AJAX) return 'ajax'
+  if (type === HISTORY_TYPE_SPIDER_CLIENT) return 'client'
   return 'other'
 }
 

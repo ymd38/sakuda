@@ -118,8 +118,9 @@ export interface DiscoveredUrl {
   method: string
   statusCode: number
   /** Which crawler first reached it: ZAP's traditional spider, ZAP's Ajax
-   * spider, katana's static JS-bundle crawl, or another ZAP history type. */
-  source: 'spider' | 'ajax' | 'katana' | 'other'
+   * spider, ZAP's Client Spider (browser-driven form submission, active checks
+   * only), katana's static JS-bundle crawl, or another ZAP history type. */
+  source: 'spider' | 'ajax' | 'client' | 'katana' | 'other'
 }
 export type DiscoveryStatus = ScanStatus
 export interface DiscoverySummary {

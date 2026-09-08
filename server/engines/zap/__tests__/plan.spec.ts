@@ -465,6 +465,50 @@ describe('buildZapDiscoverPlan', () => {
       true,
     )
   })
+
+  it('adds one Client Spider (spiderClient, scopeCheck Strict) per seed only when clientSpider is on', () => {
+    const context = { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] }
+    const base = {
+      context,
+      seedUrls: ['http://h:3000/#/', 'http://h:3000/#/login'],
+      spiderMaxMinutes: 4,
+      ajaxMaxMinutes: 4,
+      scriptFile: '/w/d.js',
+      scriptName: 'n',
+      scriptEngine: 'ECMAScript : Graal.js',
+    }
+    const clientJobs = (plan: Record<string, unknown>) =>
+      (plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>).filter(
+        (j) => j.type === 'spiderClient',
+      )
+    // Off (default) → no spiderClient jobs, so the plan matches the passive one.
+    expect(clientJobs(buildZapDiscoverPlan(base))).toEqual([])
+    // On → one per seed, bounded by spiderMaxMinutes, kept in-context.
+    expect(clientJobs(buildZapDiscoverPlan({ ...base, clientSpider: true }))).toEqual([
+      {
+        type: 'spiderClient',
+        parameters: {
+          context: 'sakuda',
+          url: 'http://h:3000/#/',
+          maxDuration: 4,
+          numberOfBrowsers: 1,
+          browserId: 'firefox-headless',
+          scopeCheck: 'Strict',
+        },
+      },
+      {
+        type: 'spiderClient',
+        parameters: {
+          context: 'sakuda',
+          url: 'http://h:3000/#/login',
+          maxDuration: 4,
+          numberOfBrowsers: 1,
+          browserId: 'firefox-headless',
+          scopeCheck: 'Strict',
+        },
+      },
+    ])
+  })
 })
 
 describe('browser-storage script jobs and multiple discovery seeds', () => {

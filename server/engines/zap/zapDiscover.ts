@@ -86,6 +86,9 @@ export const runZapDiscover: DiscoverRunner = async ({
     // Active discovery: submit forms as POST during the crawl only when the
     // site opted into active checks (a passive discovery stays GET-only).
     postForms: isActiveScanEnabled(site),
+    // Client Spider (#70) observes form-driven non-GET requests; form
+    // submission is mutating, so it rides the same active-checks gate.
+    clientSpider: isActiveScanEnabled(site),
   })
   logger.info(
     {
@@ -97,9 +100,11 @@ export const runZapDiscover: DiscoverRunner = async ({
     },
     'discovery start',
   )
-  // One traditional spider + one Ajax spider per seed, each bounded by the site's limit.
-  const timeoutMs =
-    (site.zapFeSpiderMaxMinutes * (1 + seedUrls.length) + env.engineGraceMinutes) * 60_000
+  // One traditional spider + one Ajax spider per seed, plus (under active
+  // checks) one Client Spider per seed — each bounded by the site's limit.
+  const clientSpider = isActiveScanEnabled(site)
+  const spiderRuns = 1 + seedUrls.length + (clientSpider ? seedUrls.length : 0)
+  const timeoutMs = (site.zapFeSpiderMaxMinutes * spiderRuns + env.engineGraceMinutes) * 60_000
   const run = await runZap({
     label: `discover:${discoveryId}`,
     env,
@@ -171,7 +176,7 @@ export const runZapDiscover: DiscoverRunner = async ({
     meta: {
       seedUrls: seedPaths.map((p) => joinUrl(site.frontBaseUrl, p)),
       browserStorage: site.browserStorageNames.map((n) => `${n.kind}:${n.name}`),
-      spider: 'traditional + ajax',
+      spider: clientSpider ? 'traditional + ajax + client' : 'traditional + ajax',
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       nodeCount: dump.entries.length + dump.structuralCount,
       structuralCount: dump.structuralCount,

@@ -55,9 +55,10 @@ describe('parseSiteTreeDump', () => {
 })
 
 describe('historyTypeToSource', () => {
-  it('maps ZAP history types to spider / ajax / other', () => {
+  it('maps ZAP history types to spider / ajax / client / other', () => {
     expect(historyTypeToSource(2)).toBe('spider')
     expect(historyTypeToSource(10)).toBe('ajax')
+    expect(historyTypeToSource(24)).toBe('client')
     expect(historyTypeToSource(1)).toBe('other')
   })
 })

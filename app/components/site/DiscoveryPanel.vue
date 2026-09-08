@@ -275,7 +275,9 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
                   <span v-if="row.saved" class="badge text-mute ml-2">saved</span>
                 </td>
                 <td class="py-1 pr-4 align-top">{{ row.url.statusCode }}</td>
-                <td class="py-1 align-top">{{ row.url.source }}</td>
+                <td class="py-1 align-top" data-testid="discovered-url-source">
+                  {{ row.url.source }}
+                </td>
               </tr>
             </tbody>
           </table>
