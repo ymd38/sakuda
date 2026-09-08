@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
+import { computed, reactive } from 'vue'
+import type { BrowserStorageKind, BrowserStoragePatch } from '#shared/schemas/browserStorage'
 import { BROWSER_STORAGE_KINDS } from '#shared/schemas/browserStorage'
 import type { HeaderPatch } from '#shared/schemas/headers'
 import type { SiteUpdateInput } from '#shared/schemas/site'
@@ -121,12 +121,22 @@ function toHeaderPatch(row: HeaderRow): HeaderPatch | null {
   return isStoredHeader(row) ? { name: row.name } : null
 }
 
-// Browser storage follows the same write-only contract as headers: the API
-// only ever returns kind + name, so in edit mode the editor starts hidden and
-// an untouched form omits `browserStorage` (keeps the stored set).
-type StorageRow = { kind: BrowserStorageItem['kind']; name: string; value: string }
-const storageEditable = ref(!isEditMode.value)
-const storageRows = reactive<StorageRow[]>([])
+// Browser storage follows the same write-only, per-row-patch contract as
+// headers: the API only ever returns kind + name, so in edit mode every stored
+// item starts as a row with an empty value; a row left empty is sent as
+// kind+name only, which `PUT` treats as "keep the stored value" (the merge
+// lives in siteService.updateSite, not here).
+type StorageRow = { kind: BrowserStorageKind; name: string; value: string }
+const storedStorageKeys = new Set(
+  (props.initial?.browserStorageNames ?? []).map((i) => `${i.kind}\n${i.name}`),
+)
+const storageRows = reactive<StorageRow[]>(
+  (props.initial?.browserStorageNames ?? []).map((i) => ({
+    kind: i.kind,
+    name: i.name,
+    value: '',
+  })),
+)
 
 function addStorageRow() {
   storageRows.push({ kind: 'localStorage', name: '', value: '' })
@@ -136,16 +146,17 @@ function removeStorageRow(index: number) {
   storageRows.splice(index, 1)
 }
 
-function startReplacingStorage() {
-  storageEditable.value = true
+function isStoredStorage(row: StorageRow): boolean {
+  return storedStorageKeys.has(`${row.kind}\n${row.name}`)
 }
 
-function isCompleteStorage(row: StorageRow): boolean {
-  return row.name.trim() !== '' && row.value.trim() !== ''
-}
-
-function toStorageItem(row: StorageRow): BrowserStorageItem {
-  return { kind: row.kind, name: row.name, value: row.value }
+// A row with a value is sent as-is; an empty value is only meaningful for a
+// stored (kind, name) (keep it). Any other half-filled row is dropped rather
+// than submitted, mirroring toHeaderPatch.
+function toStoragePatch(row: StorageRow): BrowserStoragePatch | null {
+  if (row.name.trim() === '') return null
+  if (row.value.trim() !== '') return { kind: row.kind, name: row.name, value: row.value }
+  return isStoredStorage(row) ? { kind: row.kind, name: row.name } : null
 }
 
 const canSubmit = computed(
@@ -182,9 +193,7 @@ function buildPayload(): SiteUpdateInput {
   return {
     ...base,
     headers: headerRows.map(toHeaderPatch).filter((h) => h !== null),
-    ...(storageEditable.value
-      ? { browserStorage: storageRows.filter(isCompleteStorage).map(toStorageItem) }
-      : {}),
+    browserStorage: storageRows.map(toStoragePatch).filter((s) => s !== null),
   }
 }
 
@@ -491,31 +500,12 @@ function handleSubmit() {
           requests; this authenticates the UI. Stored encrypted, never shown again.
         </p>
 
-        <div v-if="isEditMode && !storageEditable" class="flex flex-col gap-3">
-          <ul class="flex flex-wrap gap-2">
-            <li
-              v-for="item in props.initial?.browserStorageNames ?? []"
-              :key="`${item.kind}:${item.name}`"
-              data-testid="storage-chip"
-              class="badge"
-            >
-              {{ item.kind }}:{{ item.name }}
-            </li>
-            <li v-if="!props.initial?.browserStorageNames.length" class="text-caption-sm text-mute">
-              No browser storage configured.
-            </li>
-          </ul>
-          <button
-            type="button"
-            data-testid="replace-storage"
-            class="btn-secondary self-start"
-            @click="startReplacingStorage"
-          >
-            Replace browser storage
-          </button>
-        </div>
+        <p v-if="isEditMode" class="text-caption-sm text-mute">
+          Leave a value empty to keep the stored one; type a new value to replace it. Remove a row
+          to delete that item.
+        </p>
 
-        <div v-else data-testid="storage-editor" class="flex flex-col gap-3">
+        <div data-testid="storage-editor" class="flex flex-col gap-3">
           <div
             v-for="(row, index) in storageRows"
             :key="index"
@@ -538,7 +528,7 @@ function handleSubmit() {
               :data-testid="`storage-value-${index}`"
               type="password"
               autocomplete="off"
-              placeholder="Value"
+              :placeholder="isStoredStorage(row) ? 'unchanged' : 'Value'"
               class="input-pill"
             />
             <button

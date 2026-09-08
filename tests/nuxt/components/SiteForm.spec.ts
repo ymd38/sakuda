@@ -337,28 +337,69 @@ describe('SiteForm', () => {
     expect(payload.browserStorage).toEqual([{ kind: 'sessionStorage', name: 'bid', value: '6' }])
   })
 
-  it('lists existing browser-storage names in edit mode and omits browserStorage until Replace is clicked', async () => {
-    const wrapper = await mountSuspended(SiteForm, {
-      props: {
-        initial: {
-          ...editSite,
-          browserStorageNames: [{ kind: 'localStorage', name: 'token' }],
-        },
-        submitting: false,
-        errorMessage: null,
-      },
-    })
-    expect(wrapper.findAll('[data-testid="storage-chip"]').map((c) => c.text())).toEqual([
-      'localStorage:token',
-    ])
-    expect(wrapper.find('[data-testid="storage-editor"]').exists()).toBe(false)
-    await wrapper.find('[data-testid="site-form"]').trigger('submit')
-    expect(emittedUpdate(wrapper).browserStorage).toBeUndefined()
+  describe('edit mode browser-storage rows', () => {
+    const editStorageSite = {
+      ...editSite,
+      browserStorageNames: [
+        { kind: 'localStorage' as const, name: 'token' },
+        { kind: 'cookie' as const, name: 'sid' },
+      ],
+    }
+    async function mountEdit() {
+      return mountSuspended(SiteForm, {
+        props: { initial: editStorageSite, submitting: false, errorMessage: null },
+      })
+    }
 
-    await wrapper.find('[data-testid="replace-storage"]').trigger('click')
-    expect(wrapper.find('[data-testid="storage-editor"]').exists()).toBe(true)
-    await wrapper.find('[data-testid="site-form"]').trigger('submit')
-    expect(emittedSubmit2(wrapper).browserStorage).toEqual([])
+    it('shows every stored item as a row with an empty "unchanged" value and no Replace button', async () => {
+      const wrapper = await mountEdit()
+      expect(wrapper.find('[data-testid="storage-editor"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="replace-storage"]').exists()).toBe(false)
+      expect(inputElement(wrapper, '[data-testid="storage-name-0"]').value).toBe('token')
+      expect(inputElement(wrapper, '[data-testid="storage-name-1"]').value).toBe('sid')
+      for (const i of [0, 1]) {
+        const value = wrapper.find(`[data-testid="storage-value-${i}"]`)
+        expect(value.attributes('type')).toBe('password')
+        expect(value.attributes('placeholder')).toBe('unchanged')
+        expect(inputElement(wrapper, `[data-testid="storage-value-${i}"]`).value).toBe('')
+      }
+    })
+
+    it('sends untouched rows as kind+name only and a typed row as kind+name+value', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="storage-value-1"]').setValue('newsid')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).browserStorage).toEqual([
+        { kind: 'localStorage', name: 'token' },
+        { kind: 'cookie', name: 'sid', value: 'newsid' },
+      ])
+    })
+
+    it('removing a row drops it and adding a row appends a full item', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="remove-storage-0"]').trigger('click')
+      await wrapper.find('[data-testid="add-storage"]').trigger('click')
+      await wrapper.find('[data-testid="storage-name-1"]').setValue('bid')
+      await wrapper.find('[data-testid="storage-value-1"]').setValue('6')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).browserStorage).toEqual([
+        { kind: 'cookie', name: 'sid' },
+        { kind: 'localStorage', name: 'bid', value: '6' },
+      ])
+    })
+
+    it('with no stored items the editor starts empty and submits []', async () => {
+      const wrapper = await mountSuspended(SiteForm, {
+        props: {
+          initial: { ...editSite, browserStorageNames: [] },
+          submitting: false,
+          errorMessage: null,
+        },
+      })
+      expect(wrapper.find('[data-testid="storage-name-0"]').exists()).toBe(false)
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).browserStorage).toEqual([])
+    })
   })
 
   it('groups the fields into engine sections, each with a legend and engine badges', async () => {
@@ -422,11 +463,3 @@ describe('SiteForm', () => {
     expect(without.find('[data-testid="cancel"]').exists()).toBe(false)
   })
 })
-
-/** Second emitted submit (the first is consumed by `emittedUpdate`). */
-function emittedSubmit2(wrapper: EmitsSubmit): SiteUpdateInput {
-  const events = wrapper.emitted('submit')
-  const second = events?.[1]?.[0]
-  if (second === undefined) throw new Error('second submit was not emitted')
-  return SiteUpdateSchema.parse(second)
-}

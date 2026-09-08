@@ -142,6 +142,88 @@ describe('siteService', () => {
     expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual([])
   })
 
+  describe('update merges browser storage rows against the stored set', () => {
+    const stored = [
+      { kind: 'localStorage' as const, name: 'token', value: 'eyJ.old' },
+      { kind: 'cookie' as const, name: 'sid', value: 'old' },
+    ]
+
+    it('a row without value keeps the stored value; a row with value replaces it', () => {
+      const s = createSite(deps, { ...base, browserStorage: stored })
+      const updated = updateSite(deps, s.id, {
+        ...base,
+        browserStorage: [
+          { kind: 'localStorage', name: 'token' },
+          { kind: 'cookie', name: 'sid', value: 'new' },
+        ],
+      })
+      expect(updated.browserStorageNames).toEqual([
+        { kind: 'localStorage', name: 'token' },
+        { kind: 'cookie', name: 'sid' },
+      ])
+      expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual([
+        { kind: 'localStorage', name: 'token', value: 'eyJ.old' },
+        { kind: 'cookie', name: 'sid', value: 'new' },
+      ])
+    })
+
+    it('a stored item missing from the list is deleted; a new item is added', () => {
+      const s = createSite(deps, { ...base, browserStorage: stored })
+      updateSite(deps, s.id, {
+        ...base,
+        browserStorage: [
+          { kind: 'cookie', name: 'sid' },
+          { kind: 'sessionStorage', name: 'bid', value: '6' },
+        ],
+      })
+      expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual([
+        { kind: 'cookie', name: 'sid', value: 'old' },
+        { kind: 'sessionStorage', name: 'bid', value: '6' },
+      ])
+    })
+
+    it('same name but different kind is a distinct item, not a match', () => {
+      const s = createSite(deps, { ...base, browserStorage: stored })
+      let caught: unknown
+      try {
+        // localStorage:token is stored, but sessionStorage:token is not
+        updateSite(deps, s.id, {
+          ...base,
+          browserStorage: [{ kind: 'sessionStorage', name: 'token' }],
+        })
+      } catch (e) {
+        caught = e
+      }
+      expect((caught as ServiceError).statusCode).toBe(422)
+      expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual(stored)
+    })
+
+    it('a row without value whose (kind, name) is not stored is a 422 and writes nothing', () => {
+      const s = createSite(deps, { ...base, browserStorage: stored })
+      let caught: unknown
+      try {
+        updateSite(deps, s.id, {
+          ...base,
+          name: 'renamed',
+          browserStorage: [
+            { kind: 'localStorage', name: 'token' },
+            { kind: 'localStorage', name: 'missing' },
+          ],
+        })
+      } catch (e) {
+        caught = e
+      }
+      expect(caught).toBeInstanceOf(ServiceError)
+      const err = caught as ServiceError
+      expect(err.statusCode).toBe(422)
+      expect(err.code).toBe('VALIDATION')
+      expect(err.message).toContain('localStorage:missing')
+      expect(err.message).not.toContain('eyJ.old')
+      expect(getSite(deps.db, s.id)?.name).toBe('shop')
+      expect(loadSiteWithHeaders(deps, s.id)?.browserStorage).toEqual(stored)
+    })
+  })
+
   it('lists with lastScan null, gets, deletes', async () => {
     const s = createSite(deps, base)
     expect(listSites(deps.db)[0]).toMatchObject({

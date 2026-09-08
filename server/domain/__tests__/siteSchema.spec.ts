@@ -209,4 +209,39 @@ describe('SiteInputSchema', () => {
       issuesFor({ ...minimal, browserStorage: [{ kind: 'indexedDB', name: 'a', value: 'b' }] }),
     ).not.toHaveLength(0)
   })
+
+  it('rejects duplicate browser storage (kind, name) pairs but allows same name across kinds', () => {
+    const dup = [
+      { kind: 'localStorage', name: 'token', value: 'a' },
+      { kind: 'localStorage', name: 'token', value: 'b' },
+    ]
+    expect(
+      issuesFor({ ...minimal, browserStorage: dup }).some((i) => i.path[0] === 'browserStorage'),
+    ).toBe(true)
+    expect(SiteUpdateSchema.safeParse({ ...minimal, browserStorage: dup }).success).toBe(false)
+    // same name, different kind = distinct items
+    const ok = SiteUpdateSchema.safeParse({
+      ...minimal,
+      browserStorage: [
+        { kind: 'localStorage', name: 'token' },
+        { kind: 'sessionStorage', name: 'token', value: 'b' },
+      ],
+    })
+    expect(ok.success).toBe(true)
+  })
+
+  it('SiteUpdateSchema lets a browser storage row omit its value; SiteInputSchema still requires it', () => {
+    const rows = [
+      { kind: 'localStorage', name: 'token' },
+      { kind: 'cookie', name: 'sid', value: 'x' },
+    ]
+    const update = SiteUpdateSchema.safeParse({ ...minimal, browserStorage: rows })
+    expect(update.success).toBe(true)
+    expect(update.data?.browserStorage).toEqual(rows)
+    const create = SiteInputSchema.safeParse({ ...minimal, browserStorage: rows })
+    expect(create.success).toBe(false)
+    expect(create.error?.issues.some((i) => i.path.join('.') === 'browserStorage.0.value')).toBe(
+      true,
+    )
+  })
 })

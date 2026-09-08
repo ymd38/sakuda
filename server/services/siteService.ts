@@ -10,7 +10,7 @@ import { mergeTargetLines } from '#shared/utils/targetLines'
 import type { Logger } from '../lib/logger'
 import { ServiceError } from './errors'
 import { latestScanSummary } from './scanService'
-import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
+import type { BrowserStorageItem, BrowserStoragePatch } from '#shared/schemas/browserStorage'
 import type { Header, HeaderPatch } from '#shared/schemas/headers'
 import type { TargetShape } from '#shared/schemas/targets'
 import { NUCLEI_PATHS_MAX_CHARS, type SiteInput, type SiteUpdateInput } from '#shared/schemas/site'
@@ -104,6 +104,37 @@ function mergeHeaderPatches(stored: Header[], patches: HeaderPatch[]): Header[] 
   return merged
 }
 
+/**
+ * Browser-storage counterpart of `mergeHeaderPatches`: resolves the rows of an
+ * update against the stored set on the (kind, name) pair (exact, case-sensitive).
+ * A row with a value is the new value, a row without one keeps the stored value
+ * for that pair, and stored pairs absent from the list are dropped. Values only
+ * ever exist in the clear inside the browser-storage cipher, so this is the one
+ * place the merge can happen — the UI never sees stored values.
+ */
+function mergeBrowserStoragePatches(
+  stored: BrowserStorageItem[],
+  patches: BrowserStoragePatch[],
+): BrowserStorageItem[] {
+  const key = (i: { kind: string; name: string }) => `${i.kind}\n${i.name}`
+  const storedByKey = new Map(stored.map((i) => [key(i), i.value]))
+  const unknown: string[] = []
+  const merged: BrowserStorageItem[] = []
+  for (const patch of patches) {
+    const value = patch.value ?? storedByKey.get(key(patch))
+    if (value === undefined) unknown.push(`${patch.kind}:${patch.name}`)
+    else merged.push({ kind: patch.kind, name: patch.name, value })
+  }
+  if (unknown.length > 0)
+    throw new ServiceError(
+      422,
+      'VALIDATION',
+      `browser storage value is required for ${unknown.map((n) => `"${n}"`).join(', ')} — no stored value exists for that item (kind + name match exactly, case-sensitive)`,
+      { browserStorage: unknown },
+    )
+  return merged
+}
+
 export function updateSite(deps: SiteServiceDeps, id: string, input: SiteUpdateInput): SitePublic {
   const existing = deps.db.select().from(sites).where(eq(sites.id, id)).get()
   if (!existing) throw new ServiceError(404, 'SITE_NOT_FOUND', `site ${id} not found`)
@@ -121,7 +152,18 @@ export function updateSite(deps: SiteServiceDeps, id: string, input: SiteUpdateI
           ),
         )
   const sealedStorage =
-    browserStorage === undefined ? {} : sealBrowserStorage(deps, id, browserStorage)
+    browserStorage === undefined
+      ? {}
+      : sealBrowserStorage(
+          deps,
+          id,
+          mergeBrowserStoragePatches(
+            existing.browserStorageEnc
+              ? deps.cipher.browserStorage.open(existing.browserStorageEnc, id)
+              : [],
+            browserStorage,
+          ),
+        )
   // Saved shapes belong to saved target lines: dropping a line in Edit (the
   // one place nucleiPaths is rewritten wholesale) must drop its shape too.
   const savedKeys = new Set(parseNucleiPathLines(fields.nucleiPaths).lines.map(targetLineKey))

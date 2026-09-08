@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { RISK_TAGS } from '../types/api'
-import { BrowserStorageSchema } from './browserStorage'
+import { BrowserStoragePatchesSchema, BrowserStorageSchema } from './browserStorage'
 import { HeaderPatchesSchema, HeadersSchema } from './headers'
 import { siteRequiresConfirmation } from '../utils/localHost'
 import { parseNucleiPathLines } from '../utils/nucleiPaths'
@@ -54,9 +54,10 @@ const SiteFieldsSchema = z.object({
 
 type SiteFields = z.infer<typeof SiteFieldsSchema>
 
-/** Cross-field rules shared by create and update — they read no header
- * values, so the two header shapes can share them verbatim. */
-function refineSiteFields(v: Omit<SiteFields, 'headers'>, ctx: z.RefinementCtx) {
+/** Cross-field rules shared by create and update — they read neither header
+ * nor browser-storage values, so the create/patch shapes can share them
+ * verbatim (both secret fields are omitted from the input type). */
+function refineSiteFields(v: Omit<SiteFields, 'headers' | 'browserStorage'>, ctx: z.RefinementCtx) {
   const parsed = parseNucleiPathLines(v.nucleiPaths)
   for (const e of parsed.errors) ctx.addIssue({ code: 'custom', path: ['nucleiPaths'], message: e })
   for (const e of parseSeedPathLines(v.discoverySeedPaths).errors)
@@ -111,6 +112,7 @@ export const SiteInputSchema = SiteFieldsSchema.superRefine(refineSiteFields)
  * so clients that always send values keep working. */
 export const SiteUpdateSchema = SiteFieldsSchema.extend({
   headers: HeaderPatchesSchema.optional(),
+  browserStorage: BrowserStoragePatchesSchema.optional(),
 }).superRefine(refineSiteFields)
 
 export type SiteInput = z.infer<typeof SiteInputSchema>
