@@ -1,7 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeScan'
 import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
+import { buildNonGetOpenApiDocs } from '../../domain/openapiGen'
+import { expandNucleiTargets } from '../../domain/nucleiTargets'
 import { EngineError, OOM_RUNBOOK, type EngineRunner } from '../types'
 import { buildZapApiPlan, planToYaml, ZAP_REPORT_JSON } from './plan'
 import { buildReplacerConf } from './replacer'
@@ -9,26 +12,64 @@ import { normalizeZapReport, parseZapReport } from './report'
 import { runZap, zapPath } from './runZap'
 
 export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
-  if (!site.openapiUrl && !site.openapiJson)
-    throw new EngineError('zap-api requires openapiUrl or openapiJson')
-
   const alias = env.zap.localhostAlias
   const targetBase = site.apiBaseUrl ?? site.frontBaseUrl
   const originalHost = new URL(targetBase).hostname
   const aliasedBase = rewriteLoopbackHost(targetBase + '/', alias).replace(/\/$/, '')
 
-  let openapi: { apiFile: string } | { apiUrl: string }
-  let openapiSource: 'pasted' | 'url'
+  // One `openapi` import job per source: the user's pasted/URL doc (if any) and
+  // sakuda's generated non-GET doc (#73). The generated doc is written 0600 and
+  // deleted after the run (secretFiles), same discipline as nuclei's.
+  const openapiSources: Array<{ apiFile: string } | { apiUrl: string }> = []
+  const secretFiles: Record<string, string> = {}
+  const sourceLabels: string[] = []
+
   if (site.openapiJson) {
     await mkdir(workDir, { recursive: true })
     await writeFile(join(workDir, 'openapi.json'), site.openapiJson)
-    openapi = { apiFile: zapPath(env, workDir, 'openapi.json') }
-    openapiSource = 'pasted'
-  } else {
-    // site.openapiUrl is guaranteed set here: the guard above requires one of the two.
-    openapi = { apiUrl: rewriteLoopbackHost(site.openapiUrl as string, alias) }
-    openapiSource = 'url'
+    openapiSources.push({ apiFile: zapPath(env, workDir, 'openapi.json') })
+    sourceLabels.push('pasted')
+  } else if (site.openapiUrl) {
+    openapiSources.push({ apiUrl: rewriteLoopbackHost(site.openapiUrl, alias) })
+    sourceLabels.push('url')
   }
+
+  // Generated doc: approved non-GET body shapes become a requestBody with
+  // synthetic values. Active-checks only (the doc drives mutating requests),
+  // limited to the operations whose origin this scan targets.
+  let generatedDocCount = 0
+  if (isActiveScanEnabled(site)) {
+    const { targets } = expandNucleiTargets(site)
+    const nonGet = targets.filter((t) => t.method !== 'GET' && !t.url.includes('#'))
+    const seedOne = (u: string) => seedEmptyQueryValues([u])[0]!
+    const { docs } = buildNonGetOpenApiDocs(
+      nonGet,
+      (u) => rewriteLoopbackHost(u, alias),
+      seedOne,
+      site.requestShapes,
+    )
+    const baseOrigin = new URL(aliasedBase).origin
+    docs
+      .filter((d) => d.origin === baseOrigin)
+      .forEach((d, i) => {
+        const name = `generated-openapi-${i}.json`
+        secretFiles[name] = JSON.stringify(d.doc)
+        openapiSources.push({ apiFile: zapPath(env, workDir, name) })
+        generatedDocCount++
+      })
+  }
+
+  if (openapiSources.length === 0)
+    throw new EngineError(
+      'zap-api has no OpenAPI source: set openapiUrl or openapiJson, or approve non-GET targets with captured body shapes and turn on active injection checks',
+    )
+
+  const openapiSource =
+    sourceLabels.length > 0 && generatedDocCount > 0
+      ? `${sourceLabels[0]}+generated`
+      : generatedDocCount > 0
+        ? 'generated'
+        : (sourceLabels[0] ?? 'none')
 
   const excludeRegexes = zapExcludeRegexes(site.excludePaths)
   const passiveMaxMinutes = 5
@@ -39,7 +80,7 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
       includePaths: [`^${escapeRegex(aliasedBase)}(/.*)?$`],
       excludePaths: excludeRegexes,
     },
-    openapi,
+    openapiSources,
     targetUrl: aliasedBase,
     maxScanMinutes: site.zapApiMaxMinutes,
     passiveMaxMinutes,
@@ -63,6 +104,7 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
     workDir,
     planYaml: planToYaml(plan),
     replacerConf: site.headers.length ? buildReplacerConf(site.headers) : null,
+    ...(Object.keys(secretFiles).length > 0 ? { secretFiles } : {}),
     timeoutMs,
     signal,
     logger,
@@ -95,6 +137,7 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
       zapVersion: n.zapVersion,
       targetUrl: targetBase,
       openapiSource,
+      generatedDocCount,
       maxScanMinutes: site.zapApiMaxMinutes,
       authFailureCount: n.authFailureCount,
       alertCounts: n.alertCounts,

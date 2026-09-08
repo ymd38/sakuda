@@ -55,7 +55,10 @@ export interface ZapStandaloneScript {
 
 export interface ZapApiPlanInput {
   context: ZapContext
-  openapi: { apiFile: string } | { apiUrl: string }
+  /** One `openapi` import job per source, all into the same context before the
+   * active scan: a user's pasted/URL doc and/or sakuda's generated non-GET doc
+   * (#73). Must be non-empty. */
+  openapiSources: Array<{ apiFile: string } | { apiUrl: string }>
   targetUrl: string
   maxScanMinutes: number
   passiveMaxMinutes: number
@@ -307,10 +310,10 @@ export function buildZapApiPlan(i: ZapApiPlanInput): Record<string, unknown> {
     env: envFor(i.context),
     jobs: [
       { type: 'passiveScan-config', parameters: { enableTags: false, maxAlertsPerRule: 10 } },
-      {
+      ...i.openapiSources.map((source) => ({
         type: 'openapi',
-        parameters: { ...i.openapi, targetUrl: i.targetUrl, context: i.context.name },
-      },
+        parameters: { ...source, targetUrl: i.targetUrl, context: i.context.name },
+      })),
       activeScanJob(i.context.name, i.maxScanMinutes, {}, API_ACTIVE_SCAN_POLICY),
       { type: 'passiveScan-wait', parameters: { maxDuration: i.passiveMaxMinutes } },
       ...reportJobs(i.reportDir),

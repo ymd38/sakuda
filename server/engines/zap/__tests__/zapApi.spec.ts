@@ -36,6 +36,7 @@ function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
     nucleiEnabledRiskTags: [],
     headerNames: [],
     browserStorageNames: [],
+    requestShapes: {},
     requiresConfirmation: false,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -76,7 +77,7 @@ describe('runZapApi', () => {
         logger,
         signal: new AbortController().signal,
       }),
-    ).rejects.toThrow(/requires openapiUrl or openapiJson/)
+    ).rejects.toThrow(/no OpenAPI source/)
   })
 
   it('writes openapi.json for pasted JSON and references it via apiFile in the plan', async () => {
@@ -133,6 +134,98 @@ describe('runZapApi', () => {
     // No browser is launched for an API scan, so no Firefox pref (-config) is passed.
     const argv = JSON.parse(readFileSync(join(workDir, 'argv.json'), 'utf8')) as string[]
     expect(argv).not.toContain('-config')
+  })
+
+  const loginShapeSite = (overrides = {}) =>
+    baseSite({
+      allowMutatingRequests: true,
+      nucleiPaths: 'POST /rest/user/login',
+      requestShapes: {
+        'POST|front|/rest/user/login': {
+          contentType: 'application/json',
+          bodyShape: {
+            kind: 'json',
+            root: { type: 'object', fields: { email: { type: 'string' } } },
+          },
+        },
+      },
+      ...overrides,
+    })
+
+  it('runs with a generated doc (no user OpenAPI) when active checks and shapes are present', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env = makeEnv({}, fakeBin, tmp)
+    const workDir = join(tmp, 'work')
+
+    const out = await runZapApi({
+      scanId: 'scan-gen',
+      engine: 'zap-api',
+      site: loginShapeSite(),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const plan: unknown = YAML.parse(readFileSync(join(workDir, 'plan.yaml'), 'utf8'))
+    const jobs = (plan as { jobs: Array<{ type: string; parameters: Record<string, unknown> }> })
+      .jobs
+    const openapiJobs = jobs.filter((j) => j.type === 'openapi')
+    expect(openapiJobs).toHaveLength(1)
+    expect(String(openapiJobs[0]?.parameters.apiFile)).toBe(
+      join(workDir, 'generated-openapi-0.json'),
+    )
+    expect(out.meta.openapiSource).toBe('generated')
+    expect(out.meta.generatedDocCount).toBe(1)
+  })
+
+  it('runs both the user doc and the generated doc as separate openapi jobs', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env = makeEnv({}, fakeBin, tmp)
+    const workDir = join(tmp, 'work')
+    const openapiJson = JSON.stringify({ openapi: '3.0.0', info: { title: 't' }, paths: {} })
+
+    const out = await runZapApi({
+      scanId: 'scan-both',
+      engine: 'zap-api',
+      site: loginShapeSite({ openapiJson }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    const plan: unknown = YAML.parse(readFileSync(join(workDir, 'plan.yaml'), 'utf8'))
+    const jobs = (plan as { jobs: Array<{ type: string; parameters: Record<string, unknown> }> })
+      .jobs
+    const apiFiles = jobs
+      .filter((j) => j.type === 'openapi')
+      .map((j) => String(j.parameters.apiFile))
+    expect(apiFiles).toEqual([
+      join(workDir, 'openapi.json'),
+      join(workDir, 'generated-openapi-0.json'),
+    ])
+    expect(out.meta.openapiSource).toBe('pasted+generated')
+    expect(out.meta.generatedDocCount).toBe(1)
+  })
+
+  it('does not build a generated doc when active checks are off', async () => {
+    const fakeBin = writeFakeZap(tmp, FIXTURE)
+    const env = makeEnv({}, fakeBin, tmp)
+    const workDir = join(tmp, 'work')
+    const openapiJson = JSON.stringify({ openapi: '3.0.0', info: { title: 't' }, paths: {} })
+
+    const out = await runZapApi({
+      scanId: 'scan-off',
+      engine: 'zap-api',
+      site: loginShapeSite({ openapiJson, allowMutatingRequests: false }),
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    expect(out.meta.generatedDocCount).toBe(0)
+    expect(out.meta.openapiSource).toBe('pasted')
   })
 
   it('throws EngineError when zap.sh produces no report', async () => {

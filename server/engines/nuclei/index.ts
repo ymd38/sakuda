@@ -72,12 +72,18 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   const localAlias = env.localhostAlias
 
   // Non-GET replay is gated: only an active scan may attack. When on, each
-  // non-GET target with a query surface is fuzzed via a generated OpenAPI
-  // document (PR3); one with no query has no valid fuzz seed (we never invent
-  // a body) and is counted, not sent. When off, no non-GET is replayed at all.
+  // non-GET target with a query surface or a captured body shape (#73) is
+  // fuzzed via a generated OpenAPI document; one with neither has no valid fuzz
+  // seed (we never invent a body) and is counted, not sent. When off, no
+  // non-GET is replayed at all.
   const seedOne = (u: string) => seedEmptyQueryValues([u])[0]!
   const { docs, skippedNoFuzzSeed } = activeScan
-    ? buildNonGetOpenApiDocs(nonGet, (u) => rewriteLoopbackHost(u, localAlias), seedOne)
+    ? buildNonGetOpenApiDocs(
+        nonGet,
+        (u) => rewriteLoopbackHost(u, localAlias),
+        seedOne,
+        site.requestShapes,
+      )
     : { docs: [], skippedNoFuzzSeed: {} }
   // skippedMethods = non-GET the run did not attempt at all. Off: every non-GET.
   // On: none here — each non-GET is either fuzzed (docs) or in skippedNoFuzzSeed.

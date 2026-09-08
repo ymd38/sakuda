@@ -312,7 +312,7 @@ describe('buildZapApiPlan', () => {
   it('builds the Automation Framework plan for an openapi apiFile scan', () => {
     const plan = buildZapApiPlan({
       context,
-      openapi: { apiFile: '/zap/wrk/openapi.json' },
+      openapiSources: [{ apiFile: '/zap/wrk/openapi.json' }],
       targetUrl: 'http://h:3000/api/',
       maxScanMinutes: 10,
       passiveMaxMinutes: 5,
@@ -366,7 +366,7 @@ describe('buildZapApiPlan', () => {
   it('supports an apiUrl openapi source instead of apiFile', () => {
     const plan = buildZapApiPlan({
       context,
-      openapi: { apiUrl: 'http://h:3000/api/openapi.json' },
+      openapiSources: [{ apiUrl: 'http://h:3000/api/openapi.json' }],
       targetUrl: 'http://h:3000/api/',
       maxScanMinutes: 10,
       passiveMaxMinutes: 5,
@@ -383,6 +383,30 @@ describe('buildZapApiPlan', () => {
         context: 'sakuda',
       },
     })
+  })
+
+  it('emits one openapi job per source (user doc + generated doc) before the active scan', () => {
+    const plan = buildZapApiPlan({
+      context,
+      openapiSources: [
+        { apiFile: '/zap/wrk/openapi.json' },
+        { apiFile: '/zap/wrk/generated-openapi-0.json' },
+      ],
+      targetUrl: 'http://h:3000/api/',
+      maxScanMinutes: 10,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    })
+    const jobs = plan.jobs as Array<{ type: string; parameters: Record<string, unknown> }>
+    const openapiJobs = jobs.filter((j) => j.type === 'openapi')
+    expect(openapiJobs.map((j) => j.parameters.apiFile)).toEqual([
+      '/zap/wrk/openapi.json',
+      '/zap/wrk/generated-openapi-0.json',
+    ])
+    // both imports come before the single active scan
+    expect(jobs.findIndex((j) => j.type === 'activeScan')).toBeGreaterThan(
+      jobs.map((j) => j.type).lastIndexOf('openapi'),
+    )
   })
 })
 

@@ -21,6 +21,10 @@ export interface ExpandedTarget {
   method: TargetMethod
   base: 'front' | 'api'
   url: string
+  /** The saved line's path, kept so a consumer can recompute `targetLineKey`
+   * (e.g. to look up the line's saved request shape) without re-deriving it
+   * from the URL and base. */
+  path: string
 }
 
 export interface ExpandedNucleiTargets {
@@ -85,7 +89,7 @@ export function expandNucleiTargets(site: NucleiTargetSite): ExpandedNucleiTarge
       if (l.method === 'GET') excluded.push(url)
       continue
     }
-    targets.push({ method: l.method, base: l.base, url })
+    targets.push({ method: l.method, base: l.base, url, path: l.path })
   }
   return { targets, excluded, configured: parsed.lines.length > 0 }
 }

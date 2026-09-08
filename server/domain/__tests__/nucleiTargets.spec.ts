@@ -21,8 +21,8 @@ describe('expandNucleiTargets', () => {
   it('defaults to the base URL roots (GET) when no paths are configured', () => {
     const defaulted = expandNucleiTargets({ ...site, nucleiPaths: '' })
     expect(defaulted.targets).toEqual([
-      { method: 'GET', base: 'front', url: 'http://localhost:3000/' },
-      { method: 'GET', base: 'api', url: 'http://localhost:8080/' },
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/', path: '/' },
+      { method: 'GET', base: 'api', url: 'http://localhost:8080/', path: '/' },
     ])
     expect(defaulted.configured).toBe(false)
     expect(expandNucleiTargets(site).configured).toBe(true)
@@ -34,9 +34,9 @@ describe('expandNucleiTargets', () => {
   it('resolves front and api lines to the right bases, skipping comments', () => {
     const { targets, excluded } = expandNucleiTargets(site)
     expect(targets).toEqual([
-      { method: 'GET', base: 'front', url: 'http://localhost:3000/' },
-      { method: 'GET', base: 'api', url: 'http://localhost:8080/v1/users' },
-      { method: 'GET', base: 'front', url: 'http://localhost:3000/login' },
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/', path: '/' },
+      { method: 'GET', base: 'api', url: 'http://localhost:8080/v1/users', path: '/v1/users' },
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/login', path: '/login' },
     ])
     expect(excluded).toEqual([])
   })
@@ -56,9 +56,9 @@ describe('expandNucleiTargets', () => {
       nucleiPaths: 'POST /x\n/x\nGET /x\nPOST /x\napi:/x\n/x',
     })
     expect(targets).toEqual([
-      { method: 'POST', base: 'front', url: 'http://localhost:3000/x' },
-      { method: 'GET', base: 'front', url: 'http://localhost:3000/x' },
-      { method: 'GET', base: 'api', url: 'http://localhost:8080/x' },
+      { method: 'POST', base: 'front', url: 'http://localhost:3000/x', path: '/x' },
+      { method: 'GET', base: 'front', url: 'http://localhost:3000/x', path: '/x' },
+      { method: 'GET', base: 'api', url: 'http://localhost:8080/x', path: '/x' },
     ])
   })
 
@@ -77,13 +77,15 @@ describe('expandNucleiTargets', () => {
 describe('countSkippedMethods', () => {
   it('counts non-GET targets by method, ignoring GET', () => {
     const targets: ExpandedTarget[] = [
-      { method: 'GET', base: 'front', url: 'http://x/a' },
-      { method: 'POST', base: 'front', url: 'http://x/b' },
-      { method: 'POST', base: 'api', url: 'http://x/c' },
-      { method: 'DELETE', base: 'front', url: 'http://x/d' },
+      { method: 'GET', base: 'front', url: 'http://x/a', path: '/a' },
+      { method: 'POST', base: 'front', url: 'http://x/b', path: '/b' },
+      { method: 'POST', base: 'api', url: 'http://x/c', path: '/c' },
+      { method: 'DELETE', base: 'front', url: 'http://x/d', path: '/d' },
     ]
     expect(countSkippedMethods(targets)).toEqual({ POST: 2, DELETE: 1 })
-    expect(countSkippedMethods([{ method: 'GET', base: 'front', url: 'http://x/a' }])).toEqual({})
+    expect(
+      countSkippedMethods([{ method: 'GET', base: 'front', url: 'http://x/a', path: '/a' }]),
+    ).toEqual({})
   })
 })
 

@@ -1,3 +1,5 @@
+import { targetLineKey } from '#shared/utils/nucleiPaths'
+import type { BodyShape, JsonFieldShape, RequestShape } from '#shared/types/api'
 import type { ExpandedTarget, SkippedMethods } from './nucleiTargets'
 
 /** One generated OpenAPI document plus the original hostname its findings
@@ -28,6 +30,95 @@ function queryParams(
   return params
 }
 
+/** OpenAPI 3 schema for one JSON node shape (names + types only). A container
+ * beyond the shape's depth cap (`truncated`) becomes an open object/array. */
+function jsonSchemaOf(shape: JsonFieldShape): Record<string, unknown> {
+  switch (shape.type) {
+    case 'number':
+      return { type: 'number' }
+    case 'boolean':
+      return { type: 'boolean' }
+    case 'null':
+      return { type: 'string', nullable: true }
+    case 'object': {
+      if (shape.truncated || !shape.fields) return { type: 'object' }
+      const properties: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(shape.fields)) properties[k] = jsonSchemaOf(v)
+      return { type: 'object', properties }
+    }
+    case 'array': {
+      if (shape.truncated || !shape.items || shape.items.length === 0)
+        return { type: 'array', items: {} }
+      return { type: 'array', items: jsonSchemaOf(shape.items[0]!) }
+    }
+    default:
+      return { type: 'string' }
+  }
+}
+
+/** A synthetic example value for a JSON node shape — never an observed value.
+ * Strings are `"test"`, numbers `1`, booleans `true`, so the fuzzer has a
+ * concrete seed to mutate for every field. */
+function jsonExampleOf(shape: JsonFieldShape): unknown {
+  switch (shape.type) {
+    case 'number':
+      return 1
+    case 'boolean':
+      return true
+    case 'null':
+      return null
+    case 'object': {
+      if (shape.truncated || !shape.fields) return {}
+      const example: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(shape.fields)) example[k] = jsonExampleOf(v)
+      return example
+    }
+    case 'array': {
+      if (shape.truncated || !shape.items || shape.items.length === 0) return []
+      return [jsonExampleOf(shape.items[0]!)]
+    }
+    default:
+      return 'test'
+  }
+}
+
+/** OpenAPI media type for a shape: the observed Content-Type (params stripped)
+ * when present, else derived from the shape kind. */
+function mediaTypeOf(shape: BodyShape, contentType: string | null): string {
+  if (contentType) {
+    const mt = contentType.split(';')[0]?.trim().toLowerCase()
+    if (mt) return mt
+  }
+  return shape.kind === 'form' ? 'application/x-www-form-urlencoded' : 'application/json'
+}
+
+/** Builds an OpenAPI `requestBody` (schema + synthetic example) from a captured
+ * shape, or `undefined` when there is nothing fuzzable (kind `other`, e.g.
+ * multipart/text). No observed value is ever emitted — only names, types, and
+ * synthetic seeds. */
+function buildRequestBody(rs: RequestShape): Record<string, unknown> | undefined {
+  const { contentType, bodyShape } = rs
+  if (bodyShape.kind === 'other') return undefined
+  const mediaType = mediaTypeOf(bodyShape, contentType)
+  if (bodyShape.kind === 'form') {
+    const properties: Record<string, unknown> = {}
+    const example: Record<string, unknown> = {}
+    for (const field of bodyShape.fields) {
+      properties[field] = { type: 'string' }
+      example[field] = 'test'
+    }
+    return { content: { [mediaType]: { schema: { type: 'object', properties }, example } } }
+  }
+  return {
+    content: {
+      [mediaType]: {
+        schema: jsonSchemaOf(bodyShape.root),
+        example: jsonExampleOf(bodyShape.root),
+      },
+    },
+  }
+}
+
 function emptyDoc(origin: string): Record<string, unknown> {
   return {
     openapi: '3.0.0',
@@ -43,10 +134,11 @@ function emptyDoc(origin: string): Record<string, unknown> {
  *
  * - **One document per origin.** A document's paths are relative to its single
  *   `server`, so mixing origins would be ambiguous.
- * - **Query surface only, no request body.** Discovery captures no body shape,
- *   and the issue forbids inventing one; a non-GET target with no query
- *   parameter has no valid fuzz seed and is skipped-with-reason
- *   (`skippedNoFuzzSeed`), never given a synthetic body.
+ * - **Query surface, plus a request body when a shape was captured (#73).** A
+ *   non-GET target whose saved line has a request shape (`sites.requestShapes`)
+ *   gets a `requestBody` with synthetic values; one with neither a query
+ *   parameter nor a fuzzable shape has no valid fuzz seed and is
+ *   skipped-with-reason (`skippedNoFuzzSeed`), never given an invented body.
  * - **Literal paths.** `URL.pathname` is used undecoded so a real `{id}` is not
  *   read as OpenAPI path templating.
  * - **Collision sharding.** OpenAPI allows one operation per (path, method);
@@ -63,6 +155,7 @@ export function buildNonGetOpenApiDocs(
   targets: ExpandedTarget[],
   rewriteUrl: (url: string) => string,
   seedUrl: (url: string) => string,
+  requestShapes: Record<string, RequestShape> = {},
 ): { docs: GeneratedOpenApiDoc[]; skippedNoFuzzSeed: SkippedMethods } {
   const skippedNoFuzzSeed: SkippedMethods = {}
   // Per original origin: the original host + a list of shard docs (each doc a
@@ -81,9 +174,12 @@ export function buildNonGetOpenApiDocs(
     const original = new URL(t.url)
     const rewritten = new URL(rewriteUrl(seedUrl(t.url)))
     const params = queryParams(rewritten)
-    // No query parameter → no fuzz seed (a body would have to be invented,
-    // which the issue forbids). Count and skip.
-    if (params.length === 0) {
+    const shape = requestShapes[targetLineKey({ method: t.method, base: t.base, path: t.path })]
+    const requestBody = shape ? buildRequestBody(shape) : undefined
+    // Fuzz seed = a query parameter or a captured body shape. With neither
+    // (no query and no fuzzable shape) a body would have to be invented, which
+    // the issue forbids — count and skip.
+    if (params.length === 0 && !requestBody) {
       skippedNoFuzzSeed[t.method] = (skippedNoFuzzSeed[t.method] ?? 0) + 1
       continue
     }
@@ -102,9 +198,11 @@ export function buildNonGetOpenApiDocs(
     shard.used.add(opKey)
     const paths = shard.doc.paths as Record<string, Record<string, unknown>>
     const item = (paths[rewritten.pathname] ??= {})
-    // No requestBody for any verb: we have no schema to seed (Epic #41 PR3).
     item[t.method.toLowerCase()] = {
       parameters: params,
+      // A captured shape adds a requestBody with synthetic values (#73); a
+      // target with only a query still has none.
+      ...(requestBody ? { requestBody } : {}),
       responses: { '200': { description: 'ok' } },
     }
   }
