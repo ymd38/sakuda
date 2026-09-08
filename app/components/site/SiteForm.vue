@@ -89,36 +89,44 @@ const requiresConfirmation = computed(() => {
 // In edit mode every stored name starts as a row with an empty value; a row
 // left empty is sent as name-only, which `PUT` treats as "keep the stored
 // value" (the merge lives in siteService.updateSite, not here).
-type HeaderRow = { name: string; value: string }
-const storedHeaderNames = new Set(props.initial?.headerNames ?? [])
+// `storedName` is the name the row was created from (null for rows the user
+// added). It is what lets a renamed stored row be told apart from a new,
+// half-typed one — matching on the current name alone cannot do that.
+type HeaderRow = { name: string; value: string; storedName: string | null }
 const headerRows = reactive<HeaderRow[]>(
-  [...storedHeaderNames].map((name) => ({ name, value: '' })),
+  (props.initial?.headerNames ?? []).map((name) => ({ name, value: '', storedName: name })),
 )
 
 function addHeaderRow() {
-  headerRows.push({ name: '', value: '' })
+  headerRows.push({ name: '', value: '', storedName: null })
 }
 
 function removeHeaderRow(index: number) {
   headerRows.splice(index, 1)
 }
 
+/** A stored row whose name is untouched — the only case "unchanged" means keep. */
 function isStoredHeader(row: HeaderRow): boolean {
-  return storedHeaderNames.has(row.name)
+  return row.storedName !== null && row.name === row.storedName
 }
 
 function emptyToNull(value: string): string | null {
   return value.trim() === '' ? null : value
 }
 
-// A row with a value is sent as-is; an empty value is only meaningful for a
-// stored name (keep it). Any other half-filled row is dropped rather than
-// submitted, since the server-side error would be confusing for a row the
-// user hasn't finished typing yet.
+// A row with a value is sent as-is. A row that came from a stored header is
+// always sent, even with an empty (or cleared) name: `PUT` treats a name
+// missing from the list as "delete", so dropping such a row would silently
+// remove the stored header when the user only renamed it. Sent name-only, the
+// server keeps the value when the name still matches and answers 422 when it
+// does not — the only place that can tell, since the UI never sees values.
+// A new row the user hasn't finished typing (no name, or no value) is dropped
+// rather than submitted, since a server-side error would be confusing there.
 function toHeaderPatch(row: HeaderRow): HeaderPatch | null {
-  if (row.name.trim() === '') return null
+  const isNewRow = row.storedName === null
+  if (isNewRow && row.name.trim() === '') return null
   if (row.value.trim() !== '') return { name: row.name, value: row.value }
-  return isStoredHeader(row) ? { name: row.name } : null
+  return isNewRow ? null : { name: row.name }
 }
 
 // Browser storage follows the same write-only, per-row-patch contract as
@@ -126,37 +134,43 @@ function toHeaderPatch(row: HeaderRow): HeaderPatch | null {
 // item starts as a row with an empty value; a row left empty is sent as
 // kind+name only, which `PUT` treats as "keep the stored value" (the merge
 // lives in siteService.updateSite, not here).
-type StorageRow = { kind: BrowserStorageKind; name: string; value: string }
-const storedStorageKeys = new Set(
-  (props.initial?.browserStorageNames ?? []).map((i) => `${i.kind}\n${i.name}`),
-)
+// `storedKey` is the (kind, name) the row was created from — see `storedName`.
+type StorageRow = {
+  kind: BrowserStorageKind
+  name: string
+  value: string
+  storedKey: string | null
+}
+const storageKey = (i: { kind: string; name: string }) => `${i.kind}\n${i.name}`
 const storageRows = reactive<StorageRow[]>(
   (props.initial?.browserStorageNames ?? []).map((i) => ({
     kind: i.kind,
     name: i.name,
     value: '',
+    storedKey: storageKey(i),
   })),
 )
 
 function addStorageRow() {
-  storageRows.push({ kind: 'localStorage', name: '', value: '' })
+  storageRows.push({ kind: 'localStorage', name: '', value: '', storedKey: null })
 }
 
 function removeStorageRow(index: number) {
   storageRows.splice(index, 1)
 }
 
+/** A stored row whose kind and name are untouched — see `isStoredHeader`. */
 function isStoredStorage(row: StorageRow): boolean {
-  return storedStorageKeys.has(`${row.kind}\n${row.name}`)
+  return row.storedKey !== null && storageKey(row) === row.storedKey
 }
 
-// A row with a value is sent as-is; an empty value is only meaningful for a
-// stored (kind, name) (keep it). Any other half-filled row is dropped rather
-// than submitted, mirroring toHeaderPatch.
+// Mirrors toHeaderPatch: a stored row is never dropped (that would delete
+// it), a new half-typed row is.
 function toStoragePatch(row: StorageRow): BrowserStoragePatch | null {
-  if (row.name.trim() === '') return null
+  const isNewRow = row.storedKey === null
+  if (isNewRow && row.name.trim() === '') return null
   if (row.value.trim() !== '') return { kind: row.kind, name: row.name, value: row.value }
-  return isStoredStorage(row) ? { kind: row.kind, name: row.name } : null
+  return isNewRow ? null : { kind: row.kind, name: row.name }
 }
 
 const canSubmit = computed(
@@ -502,7 +516,7 @@ function handleSubmit() {
 
         <p v-if="isEditMode" class="text-caption-sm text-mute">
           Leave a value empty to keep the stored one; type a new value to replace it. Remove a row
-          to delete that item.
+          to delete that item. Renaming a stored item requires its value.
         </p>
 
         <div data-testid="storage-editor" class="flex flex-col gap-3">
@@ -660,7 +674,7 @@ function handleSubmit() {
 
         <p v-if="isEditMode" class="text-caption-sm text-mute">
           Leave a value empty to keep the stored one; type a new value to replace it. Remove a row
-          to delete that header.
+          to delete that header. Renaming a stored header requires its value.
         </p>
 
         <div data-testid="headers-editor" class="flex flex-col gap-3">

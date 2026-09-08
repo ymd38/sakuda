@@ -58,6 +58,16 @@ function emittedUpdate(wrapper: EmitsSubmit): SiteUpdateInput {
   return SiteUpdateSchema.parse(first)
 }
 
+/** The raw emitted payload, unparsed — for asserting what the form sends
+ * when the server (not the form) is the one expected to reject it. */
+function emittedRaw(wrapper: EmitsSubmit): SiteUpdateInput {
+  const events = wrapper.emitted('submit')
+  const first = events?.[0]?.[0]
+  if (first === undefined) throw new Error('submit was not emitted')
+  // Not validated on purpose: the assertion is about the outgoing shape.
+  return first as SiteUpdateInput
+}
+
 describe('SiteForm', () => {
   it('renders default values', async () => {
     const wrapper = await mountSuspended(SiteForm, {
@@ -211,6 +221,18 @@ describe('SiteForm', () => {
     expect(inputElement(wrapper, '[data-testid="header-value-0"]').value).toBe('')
   })
 
+  it('drops a new header row that has a value but no name', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    await wrapper.find('[data-testid="name"]').setValue('Example')
+    await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:3000')
+    await wrapper.find('[data-testid="add-header"]').trigger('click')
+    await wrapper.find('[data-testid="header-value-0"]').setValue('secret')
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+    expect(emittedSubmit(wrapper).headers).toEqual([])
+  })
+
   it('drops a header row that has a name but no value', async () => {
     const wrapper = await mountSuspended(SiteForm, {
       props: { submitting: false, errorMessage: null },
@@ -278,6 +300,39 @@ describe('SiteForm', () => {
         { name: 'Authorization' },
         { name: 'X-Api-Key' },
       ])
+    })
+
+    it('sends a renamed stored row under its new name with no value instead of dropping it', async () => {
+      // Dropping it would make the PUT list omit "Authorization", which the
+      // server reads as "delete" — the stored header would vanish silently.
+      // Sent as name-only, the server answers 422 (no stored value for the
+      // new name) and nothing is deleted.
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="header-name-0"]').setValue('Authorisation')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).headers).toEqual([
+        { name: 'Authorisation' },
+        { name: 'X-Api-Key' },
+      ])
+    })
+
+    it('sends a stored row whose name was cleared rather than dropping it', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="header-name-0"]').setValue('')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedRaw(wrapper).headers).toEqual([{ name: '' }, { name: 'X-Api-Key' }])
+    })
+
+    it('drops the "unchanged" placeholder once a stored row is renamed', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="header-name-0"]').setValue('Authorisation')
+      expect(wrapper.find('[data-testid="header-value-0"]').attributes('placeholder')).toBe(
+        'Header value',
+      )
+      await wrapper.find('[data-testid="header-name-0"]').setValue('Authorization')
+      expect(wrapper.find('[data-testid="header-value-0"]').attributes('placeholder')).toBe(
+        'unchanged',
+      )
     })
 
     it('with no stored headers the editor starts empty and submits []', async () => {
@@ -385,6 +440,52 @@ describe('SiteForm', () => {
       expect(emittedUpdate(wrapper).browserStorage).toEqual([
         { kind: 'cookie', name: 'sid' },
         { kind: 'localStorage', name: 'bid', value: '6' },
+      ])
+    })
+
+    it('sends a stored row whose kind or name changed under the new pair with no value', async () => {
+      // Same silent-deletion trap as headers: a changed (kind, name) no longer
+      // matches the stored set, and dropping the row would delete the original.
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="storage-kind-0"]').setValue('cookie')
+      await wrapper.find('[data-testid="storage-name-1"]').setValue('sid2')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).browserStorage).toEqual([
+        { kind: 'cookie', name: 'token' },
+        { kind: 'cookie', name: 'sid2' },
+      ])
+    })
+
+    it('sends a stored row whose name was cleared rather than dropping it', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="storage-name-0"]').setValue('')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedRaw(wrapper).browserStorage).toEqual([
+        { kind: 'localStorage', name: '' },
+        { kind: 'cookie', name: 'sid' },
+      ])
+    })
+
+    it('drops the "unchanged" placeholder once a stored row\'s kind or name changes', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="storage-kind-0"]').setValue('cookie')
+      expect(wrapper.find('[data-testid="storage-value-0"]').attributes('placeholder')).toBe(
+        'Value',
+      )
+      await wrapper.find('[data-testid="storage-kind-0"]').setValue('localStorage')
+      expect(wrapper.find('[data-testid="storage-value-0"]').attributes('placeholder')).toBe(
+        'unchanged',
+      )
+    })
+
+    it('drops a new storage row that has a value but no name', async () => {
+      const wrapper = await mountEdit()
+      await wrapper.find('[data-testid="add-storage"]').trigger('click')
+      await wrapper.find('[data-testid="storage-value-2"]').setValue('secret')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      expect(emittedUpdate(wrapper).browserStorage).toEqual([
+        { kind: 'localStorage', name: 'token' },
+        { kind: 'cookie', name: 'sid' },
       ])
     })
 
