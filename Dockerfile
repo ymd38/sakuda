@@ -10,11 +10,13 @@
 #   - NUCLEI_VERSION: 3.11.1 (github.com/projectdiscovery/nuclei latest release)
 #   - NUCLEI_TEMPLATES_TAG: v10.4.8 (github.com/projectdiscovery/nuclei-templates latest release)
 #   - KATANA_VERSION: 1.7.0 (github.com/projectdiscovery/katana latest release)
+#   - ASCANRULES_BETA_VERSION: 64 (zap-extensions ascanrulesBeta-v64, requires ZAP>=2.17.0)
 ARG ZAP_VERSION=2.17.0
 ARG NODE_VERSION=22.23.2
 ARG NUCLEI_VERSION=3.11.1
 ARG NUCLEI_TEMPLATES_TAG=v10.4.8
 ARG KATANA_VERSION=1.7.0
+ARG ASCANRULES_BETA_VERSION=64
 
 FROM node:${NODE_VERSION}-bookworm-slim AS build
 WORKDIR /app
@@ -31,7 +33,7 @@ COPY . .
 RUN pnpm build
 
 FROM ghcr.io/zaproxy/zaproxy:${ZAP_VERSION}
-ARG NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG KATANA_VERSION TARGETARCH
+ARG ZAP_VERSION NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG KATANA_VERSION ASCANRULES_BETA_VERSION TARGETARCH
 USER root
 
 # ZAP's Debian base already ships curl, unzip and git; if that ever changes,
@@ -61,6 +63,27 @@ RUN set -eux; \
     curl -fsSLO "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana-${KATANA_VERSION}-checksums.txt"; \
     grep "katana_${KATANA_VERSION}_linux_${TARGETARCH}.zip" "katana-${KATANA_VERSION}-checksums.txt" | sha256sum -c -; \
     unzip -o "katana_${KATANA_VERSION}_linux_${TARGETARCH}.zip" katana -d /usr/local/bin; chmod 755 /usr/local/bin/katana; rm -f katana_* katana-*
+
+# ZAP ascanrulesBeta add-on (NoSQL(MongoDB)/LDAP injection active scan rules).
+# Pinned by version + SHA-256 and dropped into /zap/plugin/ so ZAP loads it at
+# startup without any runtime marketplace fetch (offline / reproducible, per
+# ADR-0002). ZAP add-on releases ship no checksums file, so the hash is pinned
+# here the same way the Node tarball's is.
+ARG ASCANRULES_BETA_SHA256=473987bfdede353167483d69ab4725b2509dd3c9a4b3426708dce1b26802e414
+RUN set -eux; \
+    # ascanrulesBeta-v64 requires ZAP >= 2.17.0; fail the build fast if
+    # ZAP_VERSION was overridden to an older base rather than shipping an image
+    # whose ZAP cannot load the add-on.
+    dpkg --compare-versions "${ZAP_VERSION}" ge "2.17.0"; \
+    zap="ascanrulesBeta-beta-${ASCANRULES_BETA_VERSION}.zap"; \
+    curl -fsSLO "https://github.com/zaproxy/zap-extensions/releases/download/ascanrulesBeta-v${ASCANRULES_BETA_VERSION}/${zap}"; \
+    echo "${ASCANRULES_BETA_SHA256}  ${zap}" | sha256sum -c -; \
+    # Drop any other ascanrulesBeta the base image might carry so the pinned
+    # version is the only one ZAP can load (reproducibility).
+    rm -f /zap/plugin/ascanrulesBeta-*.zap; \
+    install -o zap -g zap -m 644 "${zap}" "/zap/plugin/${zap}"; \
+    rm -f "${zap}"; \
+    ls -1 "/zap/plugin/${zap}"
 
 WORKDIR /app
 COPY --from=build --chown=zap:zap /app/.output ./.output
