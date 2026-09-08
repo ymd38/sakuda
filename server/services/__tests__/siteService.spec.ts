@@ -270,4 +270,76 @@ describe('siteService', () => {
       expect(() => addSiteTargets(deps, 'nope', ['/'])).toThrow(/not found/)
     })
   })
+
+  describe('request shapes of approved non-GET lines', () => {
+    const loginShape = {
+      line: 'POST /rest/user/login',
+      contentType: 'application/json',
+      bodyShape: {
+        kind: 'json' as const,
+        root: {
+          type: 'object' as const,
+          fields: { email: { type: 'string' as const }, password: { type: 'string' as const } },
+        },
+      },
+    }
+
+    it('saves a shape under the approved line key, exposes it, and stores no values', () => {
+      const s = createSite(deps, base)
+      const r = addSiteTargets(deps, s.id, ['POST /rest/user/login'], [loginShape])
+      expect(r.site.requestShapes).toEqual({
+        'POST|front|/rest/user/login': {
+          contentType: 'application/json',
+          bodyShape: loginShape.bodyShape,
+        },
+      })
+      // shape carries names + types only — never a value
+      expect(JSON.stringify(r.site.requestShapes)).not.toContain('hunter')
+    })
+
+    it('overwrites the shape when the same line is approved again', () => {
+      const s = createSite(deps, base)
+      addSiteTargets(deps, s.id, ['POST /rest/user/login'], [loginShape])
+      const r = addSiteTargets(
+        deps,
+        s.id,
+        ['POST /rest/user/login'],
+        [{ ...loginShape, bodyShape: { kind: 'form', fields: ['email', 'password', 'otp'] } }],
+      )
+      expect(r.site.requestShapes['POST|front|/rest/user/login']?.bodyShape).toEqual({
+        kind: 'form',
+        fields: ['email', 'password', 'otp'],
+      })
+    })
+
+    it('ignores a shape whose line is not among the saved targets, and GET shapes', () => {
+      const s = createSite(deps, base)
+      const r = addSiteTargets(
+        deps,
+        s.id,
+        ['POST /rest/user/login'],
+        [
+          loginShape,
+          { ...loginShape, line: 'POST /rest/not-approved' },
+          { ...loginShape, line: '/rest/user/login' }, // GET
+        ],
+      )
+      expect(Object.keys(r.site.requestShapes)).toEqual(['POST|front|/rest/user/login'])
+    })
+
+    it('updateSite drops the shape when its line is removed from nucleiPaths', () => {
+      const s = createSite(deps, base)
+      addSiteTargets(deps, s.id, ['POST /rest/user/login'], [loginShape])
+      // Edit rewrites nucleiPaths without the POST line → its shape is pruned.
+      const updated = updateSite(deps, s.id, { ...base, nucleiPaths: '/\n/api/products' })
+      expect(updated.requestShapes).toEqual({})
+      // and kept when the line stays
+      addSiteTargets(deps, s.id, ['POST /rest/user/login'], [loginShape])
+      const kept = updateSite(deps, s.id, {
+        ...base,
+        nucleiPaths: '/\nPOST /rest/user/login',
+      })
+      expect(Object.keys(kept.requestShapes)).toEqual(['POST|front|/rest/user/login'])
+    })
+  })
 })

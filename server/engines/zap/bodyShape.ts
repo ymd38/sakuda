@@ -1,4 +1,3 @@
-import { z } from 'zod'
 import type { BodyShape, JsonFieldShape } from '#shared/types/api'
 
 /**
@@ -86,22 +85,9 @@ export function toBodyShape(contentType: string | null, rawBody: string): BodySh
   return { kind: 'other' }
 }
 
-const JsonFieldShapeSchema: z.ZodType<JsonFieldShape> = z.lazy(() =>
-  z.object({
-    type: z.enum(['string', 'number', 'boolean', 'null', 'object', 'array']),
-    fields: z.record(z.string(), JsonFieldShapeSchema).optional(),
-    items: z.array(JsonFieldShapeSchema).optional(),
-    truncated: z.literal(true).optional(),
-  }),
-)
-
-/** Validates a `bodyShape` read back from the dump — defence in depth over the
- * embedded script's output. Values never appear in this structure. */
-export const BodyShapeSchema: z.ZodType<BodyShape> = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('json'), root: JsonFieldShapeSchema }),
-  z.object({ kind: z.literal('form'), fields: z.array(z.string()) }),
-  z.object({ kind: z.literal('other') }),
-])
+/** Re-exported for existing importers; the schema itself lives in
+ * `#shared/schemas/bodyShape` so client code and the API boundary can share it. */
+export { BodyShapeSchema } from '#shared/schemas/bodyShape'
 
 /** Source of `toBodyShape` for embedding into the Graal.js dump script. Kept as
  * a named function expression assignment so the script can call `toBodyShape`

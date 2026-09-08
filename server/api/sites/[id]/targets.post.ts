@@ -6,9 +6,9 @@ import { AddTargetsBodySchema } from '#shared/schemas/targets'
 
 export default defineEventHandler(async (event) => {
   const id = requireParam(event, 'id')
-  const { lines } = await parseBody(event, AddTargetsBodySchema)
+  const { lines, shapes } = await parseBody(event, AddTargetsBodySchema)
   try {
-    return addSiteTargets(siteDeps(), id, lines)
+    return addSiteTargets(siteDeps(), id, lines, shapes)
   } catch (e) {
     toHttpError(e)
   }

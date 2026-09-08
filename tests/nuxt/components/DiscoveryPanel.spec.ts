@@ -32,6 +32,7 @@ function siteFixture(overrides: Partial<SitePublic> = {}): SitePublic {
     nucleiEnabledRiskTags: [],
     headerNames: [],
     browserStorageNames: [],
+    requestShapes: {},
     requiresConfirmation: false,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -191,7 +192,56 @@ describe('DiscoveryPanel', () => {
     expect(row.text()).toContain('POST /rest/x')
     await wrapper.find('[data-testid="save-targets"]').trigger('click')
     await flushPromises()
-    expect(posted).toEqual({ lines: ['POST /rest/x'] })
+    expect(posted).toEqual({ lines: ['POST /rest/x'], shapes: [] })
+  })
+
+  it('shows a body-shape badge and posts the shape with the approved line', async () => {
+    const bodyShape = {
+      kind: 'json' as const,
+      root: {
+        type: 'object' as const,
+        fields: { email: { type: 'string' as const }, password: { type: 'string' as const } },
+      },
+    }
+    endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
+    endpoint('/api/discoveries/disc-1', () =>
+      detailFixture({
+        urls: [
+          {
+            url: 'http://localhost:4001/rest/user/login',
+            method: 'POST',
+            statusCode: 401,
+            source: 'client',
+            contentType: 'application/json',
+            bodyShape,
+          },
+        ],
+        warnings: [],
+      }),
+    )
+    let posted: unknown
+    endpoint('/api/sites/site-1/targets', {
+      method: 'POST',
+      handler: async (event) => {
+        posted = await readBody(event)
+        return {
+          site: siteFixture(),
+          added: ['POST /rest/user/login'],
+          skipped: [],
+        } as AddTargetsResult
+      },
+    })
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-testid="discovered-url-shape"]').text()).toBe(
+      'json {email, password}',
+    )
+    await wrapper.find('[data-testid="save-targets"]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual({
+      lines: ['POST /rest/user/login'],
+      shapes: [{ line: 'POST /rest/user/login', contentType: 'application/json', bodyShape }],
+    })
   })
 
   it('shows the client source for a Client Spider row', async () => {
@@ -242,7 +292,7 @@ describe('DiscoveryPanel', () => {
     await flushPromises()
     await flushPromises()
 
-    expect(posted).toEqual({ lines: ['/rest/products/search?q=', '/health'] })
+    expect(posted).toEqual({ lines: ['/rest/products/search?q=', '/health'], shapes: [] })
     expect(wrapper.emitted('saved')?.[0]?.[0]).toEqual(updated)
     expect(wrapper.find('[data-testid="save-message"]').text()).toContain(
       'Saved 2 new target paths',

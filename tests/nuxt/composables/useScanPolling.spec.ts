@@ -38,6 +38,7 @@ function scanFixture(overrides: Partial<ScanDetail> = {}): ScanDetail {
       nucleiEnabledRiskTags: [],
       headerNames: [],
       browserStorageNames: [],
+      requestShapes: {},
       requiresConfirmation: false,
     },
     engineRuns: [],

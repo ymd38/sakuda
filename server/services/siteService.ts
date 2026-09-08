@@ -5,15 +5,16 @@ import type { Db } from '../db/client'
 import { discoveries, scans, sites } from '../db/schema'
 import type { SiteCipher } from '../domain/headerCipher'
 import { toSitePublic } from '../domain/siteView'
-import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
+import { parseNucleiPathLines, targetLineKey } from '#shared/utils/nucleiPaths'
 import { mergeTargetLines } from '#shared/utils/targetLines'
 import type { Logger } from '../lib/logger'
 import { ServiceError } from './errors'
 import { latestScanSummary } from './scanService'
 import type { BrowserStorageItem } from '#shared/schemas/browserStorage'
 import type { Header, HeaderPatch } from '#shared/schemas/headers'
+import type { TargetShape } from '#shared/schemas/targets'
 import { NUCLEI_PATHS_MAX_CHARS, type SiteInput, type SiteUpdateInput } from '#shared/schemas/site'
-import type { AddTargetsResult, SiteListItem, SitePublic } from '#shared/types/api'
+import type { AddTargetsResult, RequestShape, SiteListItem, SitePublic } from '#shared/types/api'
 
 export { toSitePublic, toSiteSnapshot } from '../domain/siteView'
 
@@ -121,9 +122,21 @@ export function updateSite(deps: SiteServiceDeps, id: string, input: SiteUpdateI
         )
   const sealedStorage =
     browserStorage === undefined ? {} : sealBrowserStorage(deps, id, browserStorage)
+  // Saved shapes belong to saved target lines: dropping a line in Edit (the
+  // one place nucleiPaths is rewritten wholesale) must drop its shape too.
+  const savedKeys = new Set(parseNucleiPathLines(fields.nucleiPaths).lines.map(targetLineKey))
+  const requestShapes: Record<string, RequestShape> = {}
+  for (const [key, shape] of Object.entries(existing.requestShapes))
+    if (savedKeys.has(key)) requestShapes[key] = shape
   deps.db
     .update(sites)
-    .set({ ...fields, ...sealed, ...sealedStorage, updatedAt: deps.now().toISOString() })
+    .set({
+      ...fields,
+      ...sealed,
+      ...sealedStorage,
+      requestShapes,
+      updatedAt: deps.now().toISOString(),
+    })
     .where(eq(sites.id, id))
     .run()
   return getSiteOrThrow(deps.db, id)
@@ -140,6 +153,7 @@ export function addSiteTargets(
   deps: SiteServiceDeps,
   id: string,
   lines: string[],
+  shapes: TargetShape[] = [],
 ): AddTargetsResult {
   const existing = deps.db.select().from(sites).where(eq(sites.id, id)).get()
   if (!existing) throw new ServiceError(404, 'SITE_NOT_FOUND', `site ${id} not found`)
@@ -168,10 +182,29 @@ export function addSiteTargets(
       `saving ${merged.added.length} line(s) would make the target list ${merged.text.length} characters, over the ${NUCLEI_PATHS_MAX_CHARS} limit — select fewer URLs or remove saved paths in Edit`,
       { limit: NUCLEI_PATHS_MAX_CHARS, wouldBe: merged.text.length },
     )
-  if (merged.added.length > 0)
+  // Store a value-free body shape for each approved non-GET line, keyed by
+  // targetLineKey. Only shapes whose line is actually in the saved set are kept
+  // (the approval gate: a shape enters the site only with its approved line),
+  // and re-approving the same line overwrites its shape.
+  const savedKeys = new Set(parseNucleiPathLines(merged.text).lines.map(targetLineKey))
+  const nextShapes: Record<string, RequestShape> = { ...existing.requestShapes }
+  let shapesChanged = false
+  for (const s of shapes) {
+    const only = parseNucleiPathLines(s.line).lines[0]
+    if (!only || only.method === 'GET') continue
+    const key = targetLineKey(only)
+    if (!savedKeys.has(key)) continue
+    nextShapes[key] = { contentType: s.contentType, bodyShape: s.bodyShape }
+    shapesChanged = true
+  }
+  if (merged.added.length > 0 || shapesChanged)
     deps.db
       .update(sites)
-      .set({ nucleiPaths: merged.text, updatedAt: deps.now().toISOString() })
+      .set({
+        nucleiPaths: merged.text,
+        ...(shapesChanged ? { requestShapes: nextShapes } : {}),
+        updatedAt: deps.now().toISOString(),
+      })
       .where(eq(sites.id, id))
       .run()
   return { site: getSiteOrThrow(deps.db, id), added: merged.added, skipped: merged.skipped }

@@ -43,6 +43,13 @@
       "when": 1788631702266,
       "tag": "0005_crawl_scope_paths",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788837545068,
+      "tag": "0006_blue_gateway",
+      "breakpoints": true
     }
   ]
 }

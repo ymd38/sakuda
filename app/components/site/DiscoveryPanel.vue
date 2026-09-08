@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   AddTargetsResult,
+  BodyShape,
   DiscoveredUrl,
   DiscoverySummary,
   SitePublic,
@@ -121,6 +122,17 @@ function selectNone() {
   selected.value = new Set()
 }
 
+/** A short, value-free badge for a captured body shape: "json {email,
+ * password}" (top-level keys), "form {q}", or the bare kind. Only names and
+ * types appear — never a captured value. */
+function bodyShapeBadge(shape: BodyShape): string {
+  if (shape.kind === 'form') return `form {${shape.fields.join(', ')}}`
+  if (shape.kind === 'other') return 'other'
+  const root = shape.root
+  if (root.type === 'object' && root.fields) return `json {${Object.keys(root.fields).join(', ')}}`
+  return `json ${root.type}`
+}
+
 const manualText = ref('')
 const manualLines = computed(() =>
   manualText.value
@@ -139,10 +151,17 @@ async function saveTargets() {
   saving.value = true
   saveError.value = null
   saveMessage.value = null
+  // Approved non-GET rows carry their captured shape along with the line, so
+  // the server stores each shape under its target line (values never sent).
+  const shapes = rows.value.flatMap((r) =>
+    r.line !== null && selected.value.has(r.line) && r.url.bodyShape
+      ? [{ line: r.line, contentType: r.url.contentType ?? null, bodyShape: r.url.bodyShape }]
+      : [],
+  )
   try {
     const result = await $fetch<AddTargetsResult>(`/api/sites/${props.site.id}/targets`, {
       method: 'POST',
-      body: { lines: linesToSave.value },
+      body: { lines: linesToSave.value, shapes },
     })
     manualText.value = ''
     saveMessage.value = `Saved ${result.added.length} new target path${result.added.length === 1 ? '' : 's'}${result.skipped.length ? ` (${result.skipped.length} already saved)` : ''}.`
@@ -273,6 +292,13 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
                 <td class="py-1 pr-4 align-top break-all">
                   {{ row.line ?? row.url.url }}
                   <span v-if="row.saved" class="badge text-mute ml-2">saved</span>
+                  <span
+                    v-if="row.url.bodyShape"
+                    class="badge text-mute ml-2"
+                    data-testid="discovered-url-shape"
+                  >
+                    {{ bodyShapeBadge(row.url.bodyShape) }}
+                  </span>
                 </td>
                 <td class="py-1 pr-4 align-top">{{ row.url.statusCode }}</td>
                 <td class="py-1 align-top" data-testid="discovered-url-source">

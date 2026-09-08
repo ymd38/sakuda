@@ -39,9 +39,18 @@ export interface SitePublic {
   headerNames: string[]
   /** kind + name of each injected browser-storage item; values are write-only. */
   browserStorageNames: BrowserStorageName[]
+  /** Value-free request-body shapes of approved non-GET targets, keyed by
+   * `targetLineKey` (see #72). Consumed by the generated OpenAPI (#73). */
+  requestShapes: Record<string, RequestShape>
   requiresConfirmation: boolean
   createdAt: string
   updatedAt: string
+}
+/** One approved non-GET target's saved request shape: the observed media type
+ * (media type only, not a secret) plus the value-free body shape. */
+export interface RequestShape {
+  contentType: string | null
+  bodyShape: BodyShape
 }
 export type SiteSnapshot = Omit<SitePublic, 'openapiJson' | 'createdAt' | 'updatedAt'> & {
   hasOpenapiJson: boolean

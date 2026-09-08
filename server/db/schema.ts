@@ -3,6 +3,7 @@ import type { BrowserStorageName } from '#shared/schemas/browserStorage'
 import type {
   DiscoveredUrl,
   Engine,
+  RequestShape,
   RiskTag,
   SeverityCounts,
   SiteSnapshot,
@@ -38,6 +39,10 @@ export const sites = sqliteTable('sites', {
     .$type<BrowserStorageName[]>()
     .notNull()
     .default([]),
+  requestShapes: text('request_shapes', { mode: 'json' })
+    .$type<Record<string, RequestShape>>()
+    .notNull()
+    .default({}),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

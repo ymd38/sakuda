@@ -24,6 +24,7 @@ function siteFixture(id: string, name: string): SiteListItem {
     nucleiEnabledRiskTags: [],
     headerNames: [],
     browserStorageNames: [],
+    requestShapes: {},
     requiresConfirmation: false,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',

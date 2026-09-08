@@ -1,0 +1,1 @@
+ALTER TABLE `sites` ADD `request_shapes` text DEFAULT '{}' NOT NULL;

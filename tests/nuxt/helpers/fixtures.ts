@@ -73,6 +73,7 @@ export function scanDetailFixture(overrides: Partial<ScanDetail> = {}): ScanDeta
       nucleiEnabledRiskTags: [],
       headerNames: [],
       browserStorageNames: [],
+      requestShapes: {},
       requiresConfirmation: false,
     },
     engineRuns: [engineRunFixture()],
