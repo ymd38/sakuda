@@ -3,6 +3,12 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isActiveScanEnabled, isSafeMethod, seedEmptyQueryValues } from '../../domain/activeScan'
 import { zapScopeContext } from '../../domain/crawlScope'
+import {
+  DOM_XSS_PROBE_BUDGET_MINUTES,
+  engineTimeBudget,
+  timeBudgetEnv,
+  ZAP_PASSIVE_MAX_MINUTES,
+} from '../../domain/engineTimeBudget'
 import { zapExcludeRegexes } from '../../domain/excludePaths'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import {
@@ -43,8 +49,8 @@ import {
   DOM_XSS_PROBE_SCRIPT_NAME,
 } from './domXssProbeScript'
 
-/** Wall-clock budget for the whole DOM XSS probe and per-navigation settle. */
-const DOM_XSS_PROBE_BUDGET_MINUTES = 10
+/** Per-navigation settle for the DOM XSS probe; its overall budget lives in
+ * domain/engineTimeBudget so the page can show it. */
 const DOM_XSS_PROBE_SETTLE_MS = 1_500
 
 export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
@@ -53,7 +59,6 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   const base = rewriteLoopbackHost(site.frontBaseUrl + '/', alias).replace(/\/$/, '')
   const seedUrl = joinUrl(base, site.zapFeSeedPath)
   const excludeRegexes = zapExcludeRegexes(site.excludePaths)
-  const passiveMaxMinutes = 5
   const hasBrowserStorage = site.browserStorage.length > 0
   // The single source of truth for "may this scan attack the target" —
   // never decided here, only read (see domain/activeScan). The cap reuses the
@@ -129,7 +134,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       : {}),
     spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
     ajaxMaxMinutes: site.zapFeSpiderMaxMinutes,
-    passiveMaxMinutes,
+    passiveMaxMinutes: ZAP_PASSIVE_MAX_MINUTES,
     ...(activeScan ? { activeScan: { maxScanMinutes: activeScanMaxMinutes } } : {}),
     requestTargets,
     ...(runDomXssProbe
@@ -165,13 +170,12 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     },
     'zap-fe start',
   )
-  const timeoutMs =
-    (site.zapFeSpiderMaxMinutes * 2 +
-      activeScanMaxMinutes +
-      (runDomXssProbe ? DOM_XSS_PROBE_BUDGET_MINUTES : 0) +
-      passiveMaxMinutes +
-      env.engineGraceMinutes) *
-    60_000
+  // The budget is the one source for the process timeout (#84).
+  const timeBudget = engineTimeBudget('zap-fe', site, timeBudgetEnv(env), {
+    activeScan,
+    domXssProbe: runDomXssProbe,
+  })
+  const timeoutMs = timeBudget.totalMinutes * 60_000
   const run = await runZap({
     label: `zap-fe:${scanId}`,
     env,
@@ -266,6 +270,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       activeScan,
       ...(activeScan ? { activeScanMaxMinutes } : {}),
+      timeBudget,
       targetUrlCount: requestTargets.length,
       hashRouteCount: hashRoutes.length,
       ...(Object.keys(skippedMethods).length > 0 ? { skippedMethods } : {}),

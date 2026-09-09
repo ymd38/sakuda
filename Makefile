@@ -40,7 +40,7 @@ keygen: ## Print a new SAKUDA_ENCRYPTION_KEY
 ## ---- docker (production-like, one container) -----------------------------
 
 build: ## Build the sakuda image (ZAP + nuclei + templates + app)
-	$(COMPOSE) build sakuda
+	$(COMPOSE) build --no-cache sakuda
 
 up: ## Start sakuda in the background (http://localhost:SAKUDA_PORT)
 	$(COMPOSE) up -d sakuda

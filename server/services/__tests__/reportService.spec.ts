@@ -21,6 +21,10 @@ const base = SiteInputSchema.parse({
 let db: Db
 let siteDeps: SiteServiceDeps
 let n = 0
+const detailDeps = {
+  env: { nucleiMaxMinutes: 60, engineGraceMinutes: 10 },
+  now: () => new Date('2026-01-01T00:07:00Z'),
+}
 
 beforeEach(() => {
   n = 0
@@ -78,19 +82,21 @@ function insertEngineRun(row: {
   scanId: string
   startedAt: string
   counts?: { critical: number; high: number; medium: number; low: number; info: number }
+  engine?: 'nuclei' | 'zap-api' | 'zap-fe'
+  meta?: Record<string, unknown>
 }) {
   db.insert(engineRuns)
     .values({
       id: row.id,
       scanId: row.scanId,
-      engine: 'nuclei',
+      engine: row.engine ?? 'nuclei',
       status: 'done',
       startedAt: row.startedAt,
       finishedAt: row.startedAt,
       exitCode: 0,
       signal: null,
       counts: row.counts ?? { critical: 0, high: 1, medium: 0, low: 0, info: 0 },
-      meta: {},
+      meta: row.meta ?? {},
       warnings: [],
       error: null,
     })
@@ -150,7 +156,7 @@ describe('reportService', () => {
 
   describe('getScanDetail', () => {
     it('returns null for a missing scan', () => {
-      expect(getScanDetail(db, 'nope')).toBeNull()
+      expect(getScanDetail(db, 'nope', detailDeps)).toBeNull()
     })
 
     it('builds diff against the previous done scan, marking new/persisting findings', () => {
@@ -182,11 +188,11 @@ describe('reportService', () => {
       insertFinding({ id: 'f-b2', scanId: 'scan-2', engineRunId: 'run-2', fingerprint: 'B' })
       insertFinding({ id: 'f-c', scanId: 'scan-2', engineRunId: 'run-2', fingerprint: 'C' })
 
-      const detail1 = getScanDetail(db, 'scan-1')
+      const detail1 = getScanDetail(db, 'scan-1', detailDeps)
       expect(detail1?.diff).toBeNull()
       expect(detail1?.findings.every((f) => f.isNew)).toBe(true)
 
-      const detail2 = getScanDetail(db, 'scan-2')
+      const detail2 = getScanDetail(db, 'scan-2', detailDeps)
       expect(detail2).not.toBeNull()
       expect(detail2?.siteName).toBe('shop')
       expect(detail2?.diff?.previousScanId).toBe('scan-1')
@@ -237,7 +243,7 @@ describe('reportService', () => {
       })
       insertEngineRun({ id: 'run-2', scanId: 'scan-2', startedAt: '2026-01-02T00:00:00Z' })
 
-      const detail = getScanDetail(db, 'scan-2')
+      const detail = getScanDetail(db, 'scan-2', detailDeps)
       expect(detail?.diff?.resolved).toHaveLength(1)
       expect(detail?.diff?.resolved[0]?.fingerprint).toBe('A')
     })
@@ -280,9 +286,56 @@ describe('reportService', () => {
         url: 'http://localhost:3001/a',
       })
 
-      const detail = getScanDetail(db, 'scan-1')
+      const detail = getScanDetail(db, 'scan-1', detailDeps)
       expect(detail?.engineRuns.map((r) => r.id)).toEqual(['run-a', 'run-b'])
       expect(detail?.findings.map((f) => f.id)).toEqual(['f-2', 'f-3', 'f-1'])
+    })
+
+    it('stamps the server clock as now and reports the budget an engine recorded (#84)', () => {
+      const site = createSite(siteDeps, base)
+      insertScan({ id: 'scan-1', siteId: site.id, createdAt: '2026-01-01T00:00:00Z' })
+      const timeBudget = { parts: [{ label: 'active scan', minutes: 45 }], totalMinutes: 45 }
+      insertEngineRun({
+        id: 'run-a',
+        scanId: 'scan-1',
+        startedAt: '2026-01-01T00:00:00Z',
+        engine: 'zap-api',
+        meta: { timeBudget },
+      })
+
+      const detail = getScanDetail(db, 'scan-1', detailDeps)
+      expect(detail?.now).toBe('2026-01-01T00:07:00.000Z')
+      expect(detail?.engineRuns[0]?.limits).toEqual({ ...timeBudget, estimated: false })
+    })
+
+    it('estimates the budget from the snapshot and env for a run that recorded none (#84)', () => {
+      const site = createSite(siteDeps, base)
+      insertScan({ id: 'scan-1', siteId: site.id, createdAt: '2026-01-01T00:00:00Z' })
+      insertEngineRun({ id: 'run-n', scanId: 'scan-1', startedAt: '2026-01-01T00:00:00Z' })
+      insertEngineRun({
+        id: 'run-fe',
+        scanId: 'scan-1',
+        startedAt: '2026-01-01T00:01:00Z',
+        engine: 'zap-fe',
+        meta: { domXssProbed: 2 },
+      })
+
+      const detail = getScanDetail(db, 'scan-1', detailDeps)
+      const [nuclei, zapFe] = detail?.engineRuns ?? []
+      expect(nuclei?.limits).toEqual({
+        parts: [{ label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: 60 }],
+        totalMinutes: 60,
+        estimated: true,
+      })
+      // snapshot: spider 5 min ×2, passive 5, grace 10, DOM probe 10 (it ran), no active scan
+      expect(zapFe?.limits.estimated).toBe(true)
+      expect(zapFe?.limits.parts.map((p) => p.label)).toEqual([
+        'spider (traditional + ajax)',
+        'DOM XSS probe',
+        'passive scan',
+        'shutdown grace',
+      ])
+      expect(zapFe?.limits.totalMinutes).toBe(10 + 10 + 5 + 10)
     })
 
     it('falls back to the site snapshot name when the site row is gone', () => {
@@ -301,7 +354,7 @@ describe('reportService', () => {
       db.delete(sites).where(eq(sites.id, site.id)).run()
       db.run(sql`PRAGMA foreign_keys = ON`)
 
-      const detail = getScanDetail(db, 'scan-1')
+      const detail = getScanDetail(db, 'scan-1', detailDeps)
       expect(detail?.siteName).toBe('shop')
     })
   })

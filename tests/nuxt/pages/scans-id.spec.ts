@@ -69,6 +69,35 @@ describe('pages/scans/[id]', () => {
     expect(wrapper.find('[data-testid="engine-run-panel"]').exists()).toBe(false)
   })
 
+  it('lists every engine of a running scan in run order, started or not (#84)', async () => {
+    polling.state.value = scanDetailFixture({
+      status: 'running',
+      engines: ['nuclei', 'zap-fe'],
+      engineRuns: [
+        engineRunFixture({
+          id: 'run-fe',
+          engine: 'zap-fe',
+          status: 'running',
+          startedAt: '2026-01-01T00:00:00.000Z',
+          finishedAt: null,
+        }),
+      ],
+      now: '2026-01-01T00:02:00.000Z',
+    })
+    const wrapper = await mountPage()
+
+    // scan-level elapsed also follows the server clock (startedAt 00:00 → now 00:02)
+    expect(wrapper.find('[data-testid="scan-elapsed"]').text()).toBe('Elapsed 2m 00s')
+    const rows = wrapper.findAll('[data-testid="engine-run-timing"]')
+    expect(rows.map((r: (typeof rows)[number]) => r.attributes('data-engine'))).toEqual([
+      'zap-fe',
+      'nuclei',
+    ])
+    expect(rows[0]!.find('[data-testid="engine-status-pill"]').text()).toBe('running')
+    expect(rows[0]!.find('[data-testid="engine-elapsed"]').text()).toBe('Elapsed 2m 00s')
+    expect(rows[1]!.find('[data-testid="engine-status-pill"]').text()).toBe('pending')
+  })
+
   it('shows a queued placeholder before the first poll response arrives', async () => {
     const wrapper = await mountPage()
     expect(wrapper.text()).toContain('Queued')

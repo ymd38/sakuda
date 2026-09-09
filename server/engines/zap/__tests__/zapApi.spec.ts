@@ -105,6 +105,8 @@ describe('runZapApi', () => {
     const openapiJob = jobs.find((j) => j.type === 'openapi')
     expect(openapiJob?.parameters.apiFile).toBe(join(workDir, 'openapi.json'))
     expect(out.meta.openapiSource).toBe('pasted')
+    // the budget the runner enforced is recorded for the page (#84)
+    expect(out.meta.timeBudget).toMatchObject({ totalMinutes: expect.any(Number) })
     expect(out.meta.targetUrl).toBe('http://localhost:3000')
   })
 

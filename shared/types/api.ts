@@ -69,6 +69,25 @@ export interface ScanSummary {
 export interface SiteListItem extends SitePublic {
   lastScan: ScanSummary | null
 }
+/** One component of an engine's wall-clock budget, in minutes. */
+export interface EngineTimeBudgetPart {
+  label: string
+  minutes: number
+}
+/** The wall-clock budget an engine run is given: the parts it is made of
+ * and their sum, which is the hard timeout the run is killed at. Computed
+ * in one place (server/domain/engineTimeBudget) and recorded by the engine
+ * into `meta.timeBudget` at run time. */
+export interface EngineTimeBudget {
+  parts: EngineTimeBudgetPart[]
+  totalMinutes: number
+}
+/** The budget as the API reports it: `estimated` is false when the engine
+ * recorded it at run time, true when it was reconstructed from the site
+ * snapshot and the *current* env for a run older than that recording. */
+export interface EngineRunLimits extends EngineTimeBudget {
+  estimated: boolean
+}
 export interface EngineRunView {
   id: string
   engine: Engine
@@ -81,6 +100,7 @@ export interface EngineRunView {
   meta: Record<string, unknown>
   warnings: string[]
   error: string | null
+  limits: EngineRunLimits
 }
 export interface FindingView {
   id: string
@@ -110,6 +130,10 @@ export interface ScanDetail extends ScanSummary {
   engineRuns: EngineRunView[]
   findings: FindingView[]
   diff: ScanDiff | null
+  /** Server clock at response time; the client derives elapsed time from
+   * this rather than its own clock, so a skewed browser clock cannot show a
+   * negative or inflated duration. */
+  now: string
 }
 export interface HistoryPoint {
   scanId: string

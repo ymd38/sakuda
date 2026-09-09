@@ -1,5 +1,7 @@
 import { createError, defineEventHandler, setHeader } from 'h3'
+import { getEnv } from '../../../config/env'
 import { getDb } from '../../../db/client'
+import { timeBudgetEnv } from '../../../domain/engineTimeBudget'
 import { buildScanMarkdown } from '../../../domain/markdownReport'
 import { requireParam } from '../../../lib/http'
 import { getScanDetail } from '../../../services/reportService'
@@ -18,7 +20,10 @@ function slugify(name: string): string {
 
 export default defineEventHandler((event) => {
   const id = requireParam(event, 'id')
-  const detail = getScanDetail(getDb(), id)
+  const detail = getScanDetail(getDb(), id, {
+    env: timeBudgetEnv(getEnv()),
+    now: () => new Date(),
+  })
   if (!detail) throw createError({ statusCode: 404, statusMessage: 'scan not found' })
   if (detail.status === 'queued' || detail.status === 'running')
     throw createError({ statusCode: 409, statusMessage: 'scan is not finished' })

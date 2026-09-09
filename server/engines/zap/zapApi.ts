@@ -1,6 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isActiveScanEnabled, seedEmptyQueryValues } from '../../domain/activeScan'
+import {
+  engineTimeBudget,
+  timeBudgetEnv,
+  ZAP_PASSIVE_MAX_MINUTES,
+} from '../../domain/engineTimeBudget'
 import { escapeRegex, zapExcludeRegexes } from '../../domain/excludePaths'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { buildNonGetOpenApiDocs } from '../../domain/openapiGen'
@@ -72,7 +77,10 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
         : (sourceLabels[0] ?? 'none')
 
   const excludeRegexes = zapExcludeRegexes(site.excludePaths)
-  const passiveMaxMinutes = 5
+  const timeBudget = engineTimeBudget('zap-api', site, timeBudgetEnv(env), {
+    activeScan: true,
+    domXssProbe: false,
+  })
   const plan = buildZapApiPlan({
     context: {
       name: 'sakuda',
@@ -83,7 +91,7 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
     openapiSources,
     targetUrl: aliasedBase,
     maxScanMinutes: site.zapApiMaxMinutes,
-    passiveMaxMinutes,
+    passiveMaxMinutes: ZAP_PASSIVE_MAX_MINUTES,
     reportDir: zapPath(env, workDir, '') + '/',
   })
   logger.info(
@@ -97,7 +105,8 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
     },
     'zap-api start',
   )
-  const timeoutMs = (site.zapApiMaxMinutes + passiveMaxMinutes + env.engineGraceMinutes) * 60_000
+  // The budget is the one source for the process timeout (#84).
+  const timeoutMs = timeBudget.totalMinutes * 60_000
   const run = await runZap({
     label: `zap-api:${scanId}`,
     env,
@@ -139,6 +148,7 @@ export const runZapApi: EngineRunner = async ({ scanId, site, workDir, env, logg
       openapiSource,
       generatedDocCount,
       maxScanMinutes: site.zapApiMaxMinutes,
+      timeBudget,
       authFailureCount: n.authFailureCount,
       alertCounts: n.alertCounts,
       reachedUrlCount: n.reachedUrls.length,

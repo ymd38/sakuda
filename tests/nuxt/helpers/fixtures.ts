@@ -17,6 +17,11 @@ export function engineRunFixture(overrides: Partial<EngineRunView> = {}): Engine
     meta: {},
     warnings: [],
     error: null,
+    limits: {
+      parts: [{ label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: 60 }],
+      totalMinutes: 60,
+      estimated: false,
+    },
     ...overrides,
   }
 }
@@ -79,6 +84,7 @@ export function scanDetailFixture(overrides: Partial<ScanDetail> = {}): ScanDeta
     engineRuns: [engineRunFixture()],
     findings: [findingFixture()],
     diff: null,
+    now: '2026-01-01T00:05:00.000Z',
     ...overrides,
   }
 }

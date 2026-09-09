@@ -77,6 +77,8 @@ describe('runZapFe', () => {
     expect(out.meta.zapVersion).toBe('2.17.0')
     expect(out.meta.seedUrl).toBe('http://localhost:3000/')
     expect(out.meta.spider).toBe('traditional + ajax')
+    // the budget the runner enforced is recorded for the page (#84)
+    expect(out.meta.timeBudget).toMatchObject({ totalMinutes: expect.any(Number) })
     // findings' urls are un-aliased back from host.docker.internal to the real host
     expect(out.findings.every((f) => f.url.includes('localhost:3000'))).toBe(true)
     expect(out.findings.some((f) => f.url.includes('host.docker.internal'))).toBe(false)

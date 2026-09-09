@@ -9,6 +9,12 @@ import {
   type FindingRow,
 } from '../db/schema'
 import { diffFingerprints } from '../domain/diff'
+import { isActiveScanEnabled } from '../domain/activeScan'
+import {
+  engineTimeBudget,
+  recordedTimeBudget,
+  type TimeBudgetEnv,
+} from '../domain/engineTimeBudget'
 import { countsForScan, toScanSummary } from './scanService'
 import type {
   Engine,
@@ -20,7 +26,36 @@ import type {
 } from '#shared/types/api'
 import { addCounts, emptyCounts, severityRank } from '#shared/utils/severity'
 
-function toEngineRunView(row: EngineRunRow): EngineRunView {
+/** Inputs `getScanDetail` needs beyond the database: the env the budget
+ * fallback reads, and the clock the response stamps as `now`. */
+export interface ScanDetailDeps {
+  env: TimeBudgetEnv
+  now: () => Date
+}
+
+/** The run's time budget as recorded by the engine, or — for a run that
+ * predates the recording — an estimate from the site snapshot and the
+ * current env, flagged as such so the page can say so (#84). */
+function runLimits(
+  row: EngineRunRow,
+  snapshot: SiteSnapshot,
+  env: TimeBudgetEnv,
+): EngineRunView['limits'] {
+  const recorded = recordedTimeBudget(row.meta)
+  if (recorded) return { ...recorded, estimated: false }
+  const estimate = engineTimeBudget(row.engine, snapshot, env, {
+    activeScan: isActiveScanEnabled(snapshot),
+    // zap-fe's probe ran iff it reported a probe count
+    domXssProbe: typeof row.meta.domXssProbed === 'number',
+  })
+  return { ...estimate, estimated: true }
+}
+
+function toEngineRunView(
+  row: EngineRunRow,
+  snapshot: SiteSnapshot,
+  env: TimeBudgetEnv,
+): EngineRunView {
   return {
     id: row.id,
     engine: row.engine,
@@ -33,6 +68,7 @@ function toEngineRunView(row: EngineRunRow): EngineRunView {
     meta: row.meta,
     warnings: row.warnings,
     error: row.error,
+    limits: runLimits(row, snapshot, env),
   }
 }
 
@@ -108,7 +144,7 @@ export function previousDoneScanId(
   return row ? row.id : null
 }
 
-export function getScanDetail(db: Db, scanId: string): ScanDetail | null {
+export function getScanDetail(db: Db, scanId: string, deps: ScanDetailDeps): ScanDetail | null {
   const scanRow = db.select().from(scans).where(eq(scans.id, scanId)).get()
   if (!scanRow) return null
 
@@ -156,9 +192,10 @@ export function getScanDetail(db: Db, scanId: string): ScanDetail | null {
     ...toScanSummary(scanRow, countsForScan(db, scanId)),
     siteName,
     siteSnapshot: scanRow.siteSnapshot,
-    engineRuns: engineRunRows.map(toEngineRunView),
+    engineRuns: engineRunRows.map((r) => toEngineRunView(r, scanRow.siteSnapshot, deps.env)),
     findings: findingViews,
     diff,
+    now: deps.now().toISOString(),
   }
 }
 

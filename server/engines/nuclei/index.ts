@@ -9,6 +9,7 @@ import {
   riskExtraTags,
   seedEmptyQueryValues,
 } from '../../domain/activeScan'
+import { engineTimeBudget, timeBudgetEnv } from '../../domain/engineTimeBudget'
 import { restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
 import { buildNonGetOpenApiDocs } from '../../domain/openapiGen'
 import { countSkippedMethods, expandNucleiTargets } from '../../domain/nucleiTargets'
@@ -123,7 +124,12 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
     'nuclei start',
   )
 
-  const deadline = Date.now() + env.nuclei.maxMinutes * 60_000
+  // The budget is the one source for the run deadline (#84).
+  const timeBudget = engineTimeBudget('nuclei', site, timeBudgetEnv(env), {
+    activeScan,
+    domXssProbe: false,
+  })
+  const deadline = Date.now() + timeBudget.totalMinutes * 60_000
   const remaining = () => deadline - Date.now()
   const findings: NewFinding[] = []
   const counts = emptyCounts()
@@ -378,6 +384,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       riskTags,
       ...(activeScan ? { dastTemplatesDir: env.nuclei.dastTemplatesDir } : {}),
       parameterizedUrlCount,
+      timeBudget,
       signaturePhase,
       dastPhase,
       stats: getStats,

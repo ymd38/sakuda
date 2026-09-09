@@ -42,6 +42,7 @@ function scanFixture(overrides: Partial<ScanDetail> = {}): ScanDetail {
       requiresConfirmation: false,
     },
     engineRuns: [],
+    now: '2026-01-01T00:00:01.000Z',
     findings: [],
     diff: null,
     ...overrides,

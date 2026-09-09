@@ -1,28 +1,17 @@
 <script setup lang="ts">
-import type { EngineRunStatus, EngineRunView, FindingView } from '#shared/types/api'
+import type { EngineRunView, FindingView } from '#shared/types/api'
+import EngineRunTiming from './EngineRunTiming.vue'
 import FindingList from './FindingList.vue'
 import SeverityCountCards from './SeverityCountCards.vue'
 
 const MAX_LIST_ITEMS = 60
 
-const props = defineProps<{ run: EngineRunView; findings: FindingView[] }>()
+const props = withDefaults(
+  defineProps<{ run: EngineRunView; findings: FindingView[]; serverNow?: string | null }>(),
+  { serverNow: null },
+)
 
 const engineFindings = computed(() => props.findings.filter((f) => f.engine === props.run.engine))
-
-function statusTextClass(status: EngineRunStatus): string {
-  switch (status) {
-    case 'done':
-      return 'text-success'
-    case 'failed':
-      return 'text-sale'
-    case 'running':
-      return 'text-mute'
-    default: {
-      const exhaustive: never = status
-      return exhaustive
-    }
-  }
-}
 
 function isPrimitive(v: unknown): v is string | number | boolean {
   return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
@@ -86,11 +75,14 @@ const metaRows = computed(() => buildMetaRows(props.run.meta))
 
 <template>
   <section class="card flex flex-col gap-4" data-testid="engine-run-panel">
-    <header class="flex flex-wrap items-center justify-between gap-2">
+    <header class="flex flex-col gap-2">
       <h2 class="font-display text-heading-md uppercase">{{ ENGINE_LABELS[run.engine] }}</h2>
-      <span class="badge" :class="statusTextClass(run.status)" data-testid="engine-status-pill">
-        {{ run.status }}
-      </span>
+      <EngineRunTiming
+        :engine="run.engine"
+        :run="run"
+        :server-now="serverNow"
+        :show-label="false"
+      />
     </header>
 
     <SeverityCountCards :counts="run.counts" />

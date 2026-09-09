@@ -51,6 +51,9 @@ const totalCounts = computed(() => {
       v-else-if="isActive"
       :status="state?.status ?? 'queued'"
       :started-at="state?.startedAt"
+      :engines="state?.engines ?? []"
+      :engine-runs="state?.engineRuns ?? []"
+      :server-now="state?.now ?? null"
     />
 
     <template v-else-if="state">
@@ -78,6 +81,7 @@ const totalCounts = computed(() => {
           :key="run.id"
           :run="run"
           :findings="state.findings"
+          :server-now="state.now"
         />
       </div>
     </template>

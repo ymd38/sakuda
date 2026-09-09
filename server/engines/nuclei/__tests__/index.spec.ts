@@ -105,6 +105,8 @@ describe('runNuclei', () => {
     expect(out.findings).toHaveLength(1)
     expect(out.counts.high).toBe(1)
     expect(out.meta.urlCount).toBe(2)
+    // the budget the runner enforced is recorded for the page (#84)
+    expect(out.meta.timeBudget).toMatchObject({ totalMinutes: expect.any(Number) })
     expect(readFileSync(join(workDir, 'targets.txt'), 'utf8')).toBe(
       'http://localhost:3001/a\nhttp://localhost:3001/b\n',
     )
