@@ -324,6 +324,7 @@ const path = require('node:path')
 const args = process.argv.slice(2)
 const outFile = args[args.indexOf('-o') + 1]
 fs.writeFileSync(path.join(path.dirname(outFile), 'argv-' + path.basename(outFile) + '.json'), JSON.stringify(args))
+fs.appendFileSync(path.join(path.dirname(outFile), 'order.log'), path.basename(outFile) + '\\n')
 fs.writeFileSync(outFile, '')
 console.log(JSON.stringify({ requests: '10', errors: '0' }))
 process.exit(0)
@@ -392,7 +393,9 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
       return existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as string[]) : null
     }
     // signature phase = `findings.jsonl`; GET DAST phase = `dast-findings.jsonl`
-    return { out, argv: argvOf('findings.jsonl')!, dastArgv: argvOf('dast-findings.jsonl') }
+    const orderPath = join(workDir, 'order.log')
+    const order = existsSync(orderPath) ? readFileSync(orderPath, 'utf8').trim().split('\n') : []
+    return { out, argv: argvOf('findings.jsonl')!, dastArgv: argvOf('dast-findings.jsonl'), order }
   }
 
   it('runs the signature phase only, never -dast, when the site is not opted in', async () => {
@@ -425,10 +428,13 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     expect(targets).not.toContain('#')
   })
 
-  it('under active checks runs two GET phases: signature (http tree, no -dast) then DAST (dast tree, -dast)', async () => {
-    const { out, argv, dastArgv } = await run(
+  it('under active checks runs two GET phases: DAST (dast tree, -dast) first, then signature (http tree, no -dast)', async () => {
+    const { out, argv, dastArgv, order } = await run(
       baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=\n/plain' }),
     )
+    // DAST runs first so the short phase never queues behind the long
+    // signature phase inside the shared engine budget (#82)
+    expect(order).toEqual(['dast-findings.jsonl', 'findings.jsonl'])
     // signature phase: the http tree only, and never -dast (it would drop every signature template)
     expect(argv).not.toContain('-dast')
     expect(argv.filter((a) => a === '-t')).toHaveLength(1)
@@ -522,5 +528,86 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     expect(argv).not.toContain('-dast')
     expect(out.meta.activeScan).toBe(false)
     expect(out.meta.dastPhase).toBe('skipped')
+  })
+})
+
+// One "high" finding per run; the stats line's percent comes from
+// FAKE_PERCENT, and FAKE_SKIP_HOST (when set) makes the binary print
+// nuclei's "Skipped <host> ... unresponsive" line to stderr — the shape of a
+// run nuclei's -max-host-error guard cut short (#82).
+const FAKE_PARTIAL = `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+const outFile = args[args.indexOf('-o') + 1]
+const finding = {
+  'template-id': 'fake-high',
+  info: { name: 'Fake High', severity: 'high' },
+  host: 'localhost:3001',
+  'matched-at': 'http://localhost:3001/a',
+}
+fs.writeFileSync(outFile, JSON.stringify(finding) + '\\n')
+if (process.env.FAKE_SKIP_HOST)
+  console.error('[INF] Skipped ' + process.env.FAKE_SKIP_HOST + ' from target list as found unresponsive 33 times')
+console.log(JSON.stringify({ requests: '70268', errors: '1557', total: '868770', percent: process.env.FAKE_PERCENT }))
+console.error('[INF] Scan completed in 16m. 1 matches found.')
+process.exit(0)
+`
+
+describe('runNuclei partial phase detection (#82)', () => {
+  let tmp: string
+  const logger = pino({ level: 'silent' })
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'sakuda-nuclei-partial-'))
+  })
+
+  async function run(fakeEnv: Record<string, string>) {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_PARTIAL)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+    const workDir = join(tmp, 'work')
+    const savedEnv = { ...process.env }
+    Object.assign(process.env, fakeEnv)
+    try {
+      return await runNuclei({
+        scanId: 'scan-partial',
+        engine: 'nuclei',
+        site: baseSite(),
+        workDir,
+        env,
+        logger,
+        signal: new AbortController().signal,
+      })
+    } finally {
+      process.env = savedEnv
+    }
+  }
+
+  it('marks the signature phase partial and warns when nuclei skipped the host, keeping its findings', async () => {
+    const out = await run({ FAKE_PERCENT: '8', FAKE_SKIP_HOST: 'localhost:3001' })
+    expect(out.meta.signaturePhase).toBe('partial')
+    expect(out.counts.high).toBe(1)
+    expect(out.exitCode).toBe(0)
+    expect(out.warnings).toEqual([
+      expect.stringMatching(
+        /nuclei signature phase is partial: host localhost:3001 was skipped after 33 errors .*8% of planned requests executed \(70268\/868770, 1557 errors\)/,
+      ),
+    ])
+  })
+
+  it('marks the phase partial on coverage below 100% even without a skipped-host line', async () => {
+    const out = await run({ FAKE_PERCENT: '42' })
+    expect(out.meta.signaturePhase).toBe('partial')
+    expect(out.warnings).toEqual([expect.stringMatching(/42% of planned requests executed/)])
+    expect(out.warnings[0]).not.toMatch(/was skipped/)
+  })
+
+  it('reports a fully covered run as ok with no partial warning', async () => {
+    const out = await run({ FAKE_PERCENT: '100' })
+    expect(out.meta.signaturePhase).toBe('ok')
+    expect(out.warnings).toEqual([])
   })
 })

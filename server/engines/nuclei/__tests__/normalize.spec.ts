@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeNucleiLines, parseNucleiJsonl, parseNucleiStats } from '../normalize'
+import {
+  normalizeNucleiLines,
+  parseNucleiJsonl,
+  parseNucleiStats,
+  parseSkippedHosts,
+} from '../normalize'
 
 const highLine = JSON.stringify({
   'template-id': 'ftp-anon-login',
@@ -101,5 +106,47 @@ describe('normalizeNucleiLines', () => {
     const { findings } = normalizeNucleiLines(lines, (u) => u)
     expect(findings[0]!.raw).not.toHaveProperty('request')
     expect(findings[0]!.raw).not.toHaveProperty('response')
+  })
+})
+
+describe('parseNucleiStats percent (#82)', () => {
+  it('keeps the percent field of the last stats line', () => {
+    const log = [
+      JSON.stringify({ requests: '100', errors: '0', percent: '50' }),
+      '[INF] something',
+      JSON.stringify({ requests: '70268', errors: '1557', percent: '8', total: '868770' }),
+    ].join('\n')
+    expect(parseNucleiStats(log)).toMatchObject({ percent: '8', total: '868770' })
+  })
+})
+
+describe('parseSkippedHosts (#82)', () => {
+  const stderr = [
+    '[INF] Executing 5022 signed templates from projectdiscovery/nuclei-templates',
+    '[INF] Targets loaded for current scan: 70',
+    '[INF] Skipped host.docker.internal:4001 from target list as found unresponsive 33 times',
+    '[INF] Skipped host.docker.internal:4001 from target list as found unresponsive 49 times',
+    '[INF] Skipped api.example.test:8443 from target list as found unresponsive 30 times',
+    '[INF] Scan completed in 16m. 0 matches found.',
+  ].join('\n')
+
+  it('returns one entry per skipped host with its highest error count', () => {
+    expect(parseSkippedHosts(stderr)).toEqual([
+      { host: 'host.docker.internal:4001', errors: 49 },
+      { host: 'api.example.test:8443', errors: 30 },
+    ])
+  })
+
+  it('matches the message behind a timestamp or logger prefix', () => {
+    expect(
+      parseSkippedHosts(
+        '[2026-09-08 14:50:01] [INF] Skipped host.docker.internal:4001 from target list as found unresponsive 30 times\n',
+      ),
+    ).toEqual([{ host: 'host.docker.internal:4001', errors: 30 }])
+  })
+
+  it('is empty when nuclei skipped nothing', () => {
+    expect(parseSkippedHosts('[INF] Scan completed in 1m. 3 matches found.\n')).toEqual([])
+    expect(parseSkippedHosts('')).toEqual([])
   })
 })

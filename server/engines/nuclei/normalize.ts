@@ -31,6 +31,9 @@ export interface NucleiStats {
   errors?: string
   hosts?: string
   matched?: string
+  /** Percent of planned requests executed (`-stats-json`); below 100 at exit
+   * means nuclei stopped early. */
+  percent?: string
   requests?: string
   rps?: string
   templates?: string
@@ -120,4 +123,35 @@ export function normalizeNucleiLines(
     })
   }
   return { findings, counts }
+}
+
+export interface SkippedHost {
+  host: string
+  /** Error count at which nuclei dropped the host (its `-max-host-error` guard). */
+  errors: number
+}
+
+// Not anchored to the `[INF]` prefix: a timestamp or logger prefix in front
+// of the message (nuclei `-ts`, a log wrapper) must not turn a skipped host
+// into a "clean" run.
+const SKIPPED_HOST_RE = /Skipped (\S+) from target list as found unresponsive (\d+) times/
+
+/**
+ * Hosts nuclei removed from the scan mid-run because of its per-host error
+ * guard (`-max-host-error`). nuclei logs the line once per template cluster
+ * that hit the guard, so a host repeats; keep one entry per host with the
+ * highest count. Every phase disables the guard (#82), so a hit here means
+ * the flag was dropped or nuclei changed behaviour — either way the phase
+ * did not cover its targets and must not be reported as "ran clean".
+ */
+export function parseSkippedHosts(logText: string): SkippedHost[] {
+  const byHost = new Map<string, number>()
+  for (const line of logText.split('\n')) {
+    const m = SKIPPED_HOST_RE.exec(line.trim())
+    if (!m) continue
+    const host = m[1]!
+    const errors = Number(m[2])
+    byHost.set(host, Math.max(byHost.get(host) ?? 0, errors))
+  }
+  return [...byHost].map(([host, errors]) => ({ host, errors }))
 }

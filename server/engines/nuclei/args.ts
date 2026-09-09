@@ -15,6 +15,15 @@ export interface NucleiArgsInput {
   excludeTags?: string[]
 }
 
+/**
+ * Every phase passes `-no-mhe`: nuclei's default `-max-host-error 30` drops a
+ * host from the scan after 30 errors, which is a sane guard when scanning
+ * thousands of hosts but fatal here — a site's targets share one or two
+ * hosts, so one skip silently ends the whole phase at a few percent
+ * coverage (#82). Slow or error-prone targets are the norm for a DAST run.
+ */
+export const NUCLEI_NO_HOST_ERROR_SKIP = '-no-mhe'
+
 export const NUCLEI_BASE_TAGS = ['xss', 'injection', 'sqli', 'ssrf', 'lfi', 'exposure', 'misconfig']
 
 /** Risk-template tags nuclei excludes by default; a site can opt individual
@@ -56,6 +65,7 @@ export function buildNucleiArgs(i: NucleiArgsInput): string[] {
     '-si',
     '5',
     '-duc',
+    NUCLEI_NO_HOST_ERROR_SKIP,
     '-nc',
     '-omit-raw',
     ...headersToHeaderArgs(i.headers),
@@ -107,6 +117,7 @@ export function buildNucleiDastArgs(i: NucleiDastArgsInput): string[] {
     '-si',
     '5',
     '-duc',
+    NUCLEI_NO_HOST_ERROR_SKIP,
     '-nc',
     '-omit-raw',
     ...headersToHeaderArgs(i.headers),
@@ -154,6 +165,7 @@ export function buildNucleiOpenapiArgs(i: NucleiOpenapiArgsInput): string[] {
     '-si',
     '5',
     '-duc',
+    NUCLEI_NO_HOST_ERROR_SKIP,
     '-nc',
     '-omit-raw',
     ...headersToHeaderArgs(i.headers),

@@ -27,7 +27,9 @@ import {
   normalizeNucleiLines,
   parseNucleiJsonl,
   parseNucleiStats,
+  parseSkippedHosts,
   type NucleiStats,
+  type SkippedHost,
 } from './normalize'
 
 /** Least a phase may run before we treat the overall deadline as spent. */
@@ -36,11 +38,16 @@ const MIN_PHASE_MS = 30_000
 interface PhaseOutcome {
   findings: NewFinding[]
   counts: SeverityCounts
-  /** 'ok' = produced output; 'empty' = ran clean but no findings; 'failed' =
-   * non-zero exit / timeout / no output after a failure. */
-  status: 'ok' | 'empty' | 'failed'
+  /** 'ok' = produced output; 'empty' = ran clean but no findings; 'partial' =
+   * not a failure (see `failed` below) but did not cover its targets (a host was skipped by
+   * nuclei's error guard, or the stats say fewer than 100% of planned
+   * requests ran), findings or not — see #82; 'failed' = non-zero exit /
+   * timeout / no output after a failure. */
+  status: 'ok' | 'empty' | 'partial' | 'failed'
   result: CommandResult
   stats: NucleiStats | null
+  /** Hosts nuclei dropped mid-run; non-empty only when status is 'partial'. */
+  skippedHosts: SkippedHost[]
   invalidLines: number
 }
 
@@ -153,37 +160,49 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       anyCompleted = true
       findings.push(...phase.findings)
       addCounts(counts, phase.counts)
+      if (phase.status === 'partial') warnings.push(partialPhaseWarning(label, phase, stderrPath))
     }
     if (phase.invalidLines > 0)
       warnings.push(`${phase.invalidLines} unparsable JSONL line(s) ignored (${label} phase)`)
   }
 
-  // --- phase 1: GET URL list, signature templates (the `http` tree) --------
-  // Same argv in both modes except the tag lists; never `-dast`, which
-  // would make nuclei run DAST templates only and drop every signature
-  // template (#65).
+  // Both GET phases read the same targets file (seeded query values under
+  // active checks), so it is written once, ahead of either.
   const targetsFile = join(workDir, 'targets.txt')
   if (getUrls.length > 0) {
-    const outputFile = join(workDir, 'findings.jsonl')
-    const stdoutPath = join(workDir, 'stdout.log')
-    const stderrPath = join(workDir, 'stderr.log')
     const targetUrls = activeScan ? seedEmptyQueryValues(getUrls) : getUrls
     await writeFile(
       targetsFile,
       targetUrls.map((u) => rewriteLoopbackHost(u, localAlias)).join('\n') + '\n',
     )
-    const args = buildNucleiArgs({
+  }
+
+  // --- phase 1a: GET URL list, DAST templates (active checks only) --------
+  // Runs FIRST: the DAST tree is ~20 templates and finishes in well under a
+  // minute, while the signature tree can run for hours on a large target
+  // list. The phases share one engine budget (`env.nuclei.maxMinutes`), so
+  // the short one must not queue behind the long one — with the host-error
+  // guard off (#82) the signature phase now routinely reaches the budget,
+  // and running DAST second would silently skip it every time.
+  // A separate nuclei run because `-dast` is exclusive; same targets file
+  // and tag lists as the signature phase, so the risk opt-ins gate it
+  // identically.
+  if (activeScan && getUrls.length > 0) {
+    const outputFile = join(workDir, 'dast-findings.jsonl')
+    const stdoutPath = join(workDir, 'dast-stdout.log')
+    const stderrPath = join(workDir, 'dast-stderr.log')
+    const args = buildNucleiDastArgs({
       targetsFile,
-      templatesDir: env.nuclei.templatesDir,
+      dastTemplatesDir: env.nuclei.dastTemplatesDir,
       outputFile,
       rateLimit: site.nucleiRateLimit,
       concurrency: 25,
       tags,
-      headers: site.headers,
       excludeTags: riskExcludeTags(riskTags),
+      headers: site.headers,
     })
     const phase = await runNucleiPhase({
-      label: `nuclei:${scanId}`,
+      label: `nuclei-dast:${scanId}`,
       cmd: env.nuclei.bin,
       args,
       workDir,
@@ -196,36 +215,37 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       unalias: unaliasFront,
       readStats: true,
     })
-    absorb(phase, 'signature', stderrPath)
-    signaturePhase = phase.status
-    getStats = phase.stats
+    absorb(phase, 'DAST', stderrPath)
+    dastPhase = phase.status
+    dastStats = phase.stats
   }
 
-  // --- phase 1b: the same GET list, DAST templates (active checks only) ----
-  // A separate nuclei run because `-dast` is exclusive; same targets file
-  // and tag lists as phase 1, so the risk opt-ins gate it identically.
-  if (activeScan && getUrls.length > 0 && !anAborted) {
+  // --- phase 1b: the same GET list, signature templates (the `http` tree) --
+  // Same argv in both modes except the tag lists; never `-dast`, which
+  // would make nuclei run DAST templates only and drop every signature
+  // template (#65).
+  if (getUrls.length > 0 && !anAborted) {
     if (remaining() <= 0) {
       warnings.push(
-        'nuclei was stopped by the engine timeout before the DAST phase started; results are partial',
+        'nuclei was stopped by the engine timeout before the signature phase started; results are partial',
       )
       timedOut = true
     } else {
-      const outputFile = join(workDir, 'dast-findings.jsonl')
-      const stdoutPath = join(workDir, 'dast-stdout.log')
-      const stderrPath = join(workDir, 'dast-stderr.log')
-      const args = buildNucleiDastArgs({
+      const outputFile = join(workDir, 'findings.jsonl')
+      const stdoutPath = join(workDir, 'stdout.log')
+      const stderrPath = join(workDir, 'stderr.log')
+      const args = buildNucleiArgs({
         targetsFile,
-        dastTemplatesDir: env.nuclei.dastTemplatesDir,
+        templatesDir: env.nuclei.templatesDir,
         outputFile,
         rateLimit: site.nucleiRateLimit,
         concurrency: 25,
         tags,
-        excludeTags: riskExcludeTags(riskTags),
         headers: site.headers,
+        excludeTags: riskExcludeTags(riskTags),
       })
       const phase = await runNucleiPhase({
-        label: `nuclei-dast:${scanId}`,
+        label: `nuclei:${scanId}`,
         cmd: env.nuclei.bin,
         args,
         workDir,
@@ -238,9 +258,9 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
         unalias: unaliasFront,
         readStats: true,
       })
-      absorb(phase, 'DAST', stderrPath)
-      dastPhase = phase.status
-      dastStats = phase.stats
+      absorb(phase, 'signature', stderrPath)
+      signaturePhase = phase.status
+      getStats = phase.stats
     }
   }
 
@@ -418,14 +438,46 @@ async function runNucleiPhase(i: PhaseInput): Promise<PhaseOutcome> {
           (existsSync(i.stderrPath) ? await readFile(i.stderrPath, 'utf8') : ''),
       )
     : null
+  const skippedHosts = i.readStats
+    ? parseSkippedHosts(existsSync(i.stderrPath) ? await readFile(i.stderrPath, 'utf8') : '')
+    : []
   const failed = result.aborted || (result.code !== 0 && !result.timedOut && lines.length === 0)
+  // A run our own timeout or abort cut short is already reported as such;
+  // 'partial' is for a run nuclei itself ended early while exiting cleanly.
+  const partial =
+    !failed && !result.timedOut && (skippedHosts.length > 0 || coveragePercent(stats) < 100)
   const { findings, counts } = normalizeNucleiLines(lines, i.unalias)
   return {
     findings,
     counts,
-    status: failed ? 'failed' : lines.length > 0 ? 'ok' : 'empty',
+    status: failed ? 'failed' : partial ? 'partial' : lines.length > 0 ? 'ok' : 'empty',
     result,
     stats,
+    skippedHosts,
     invalidLines,
   }
+}
+
+/** Percent of planned requests nuclei reports as executed; 100 when the stats
+ * carry no `percent` (older nuclei, or a phase run without `-stats-json`),
+ * so a missing field never flags a clean run as partial. */
+function coveragePercent(stats: NucleiStats | null): number {
+  const n = Number(stats?.percent)
+  return stats?.percent !== undefined && Number.isFinite(n) ? n : 100
+}
+
+/** Runbook-friendly warning for a phase nuclei ended early on its own: names
+ * the skipped hosts and their error counts, and the executed share of the
+ * planned requests, so the reader can tell "no findings" from "not covered". */
+function partialPhaseWarning(label: string, phase: PhaseOutcome, stderrPath: string): string {
+  const skipped =
+    phase.skippedHosts.length > 0
+      ? `host ${phase.skippedHosts.map((h) => `${h.host} was skipped after ${h.errors} errors`).join(', ')} (nuclei -max-host-error guard); `
+      : ''
+  const s = phase.stats
+  const coverage =
+    s?.percent !== undefined
+      ? `${s.percent}% of planned requests executed (${s.requests ?? '?'}/${s.total ?? '?'}, ${s.errors ?? '?'} errors)`
+      : 'nuclei ended before covering its targets'
+  return `nuclei ${label} phase is partial: ${skipped}${coverage} — results are incomplete. Check the target's error responses or lower nucleiRateLimit; see ${stderrPath}`
 }

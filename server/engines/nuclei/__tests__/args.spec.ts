@@ -51,6 +51,7 @@ describe('buildNucleiArgs', () => {
       '-si',
       '5',
       '-duc',
+      '-no-mhe',
       '-nc',
       '-omit-raw',
       '-H',
@@ -110,6 +111,7 @@ describe('buildNucleiDastArgs (the active GET DAST phase)', () => {
       '-si',
       '5',
       '-duc',
+      '-no-mhe',
       '-nc',
       '-omit-raw',
       '-H',
@@ -203,5 +205,44 @@ describe('buildNucleiArgs excludeTags', () => {
 
   it('emits an empty -exclude-tags value when every risk group is enabled', () => {
     expect(excludeOf(buildNucleiArgs({ ...base, excludeTags: [] }))).toBe('')
+  })
+})
+
+describe('host-error guard (#82)', () => {
+  const headers = [{ name: 'Cookie', value: 'a=b' }]
+
+  it('every phase passes -no-mhe: one skipped host would silently end the phase', () => {
+    const signature = buildNucleiArgs({
+      targetsFile: 't.txt',
+      templatesDir: '/tpl/http',
+      outputFile: 'o.jsonl',
+      rateLimit: 50,
+      concurrency: 25,
+      tags: ['sqli'],
+      headers,
+    })
+    const dast = buildNucleiDastArgs({
+      targetsFile: 't.txt',
+      dastTemplatesDir: '/tpl/dast',
+      outputFile: 'dast.jsonl',
+      rateLimit: 50,
+      concurrency: 25,
+      tags: ['sqli'],
+      excludeTags: ['dos'],
+      headers,
+    })
+    const openapi = buildNucleiOpenapiArgs({
+      openapiFile: '/w/openapi-0.json',
+      dastTemplatesDir: '/tpl/dast',
+      outputFile: 'oa.jsonl',
+      rateLimit: 50,
+      concurrency: 25,
+      headers,
+    })
+    for (const args of [signature, dast, openapi]) {
+      expect(args).toContain('-no-mhe')
+      expect(args).not.toContain('-mhe')
+      expect(args).not.toContain('-max-host-error')
+    }
   })
 })
