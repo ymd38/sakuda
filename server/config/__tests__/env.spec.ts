@@ -18,6 +18,7 @@ describe('parseEnv', () => {
     expect(env.dbFile).toBe('/tmp/x/sakuda.db')
     expect(env.scansDir).toBe('/tmp/x/scans')
     expect(env.nuclei.maxMinutes).toBe(60)
+    expect(env.nuclei.concurrency).toBe(25)
     expect(env.nuclei.templatesDir).toBe('/opt/nuclei-templates/http')
     expect(env.nuclei.dastTemplatesDir).toBe('/opt/nuclei-templates/dast')
     expect(env.katana.bin).toBe('katana')
@@ -37,6 +38,15 @@ describe('parseEnv', () => {
     expect(() =>
       parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_NUCLEI_MAX_MINUTES: 'ten' }),
     ).toThrow(EnvError)
+  })
+
+  it('reads SAKUDA_NUCLEI_CONCURRENCY and rejects a non-positive value', () => {
+    expect(
+      parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_NUCLEI_CONCURRENCY: '8' }).nuclei.concurrency,
+    ).toBe(8)
+    expect(() => parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_NUCLEI_CONCURRENCY: '0' })).toThrow(
+      EnvError,
+    )
   })
 
   describe('resolving relative executable paths (C2)', () => {

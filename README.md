@@ -86,7 +86,8 @@ Override per invocation with `make up SAKUDA_PORT=3005`.
 | `SAKUDA_NUCLEI_BIN`            | `nuclei` (`/usr/local/bin/nuclei` in the image)           | Path to the nuclei binary.                                                                                                       |
 | `SAKUDA_NUCLEI_TEMPLATES`      | `/opt/nuclei-templates/http`                              | Pinned nuclei-templates checkout.                                                                                                |
 | `SAKUDA_NUCLEI_DAST_TEMPLATES` | `/opt/nuclei-templates/dast`                              | DAST (fuzzing) templates, loaded only for sites with "Active injection checks" on.                                               |
-| `SAKUDA_NUCLEI_MAX_MINUTES`    | `60`                                                      | Hard timeout for a nuclei run.                                                                                                   |
+| `SAKUDA_NUCLEI_MAX_MINUTES`    | `60`                                                      | Hard timeout for a nuclei run, shared across its phases (DAST / signature / OpenAPI).                                            |
+| `SAKUDA_NUCLEI_CONCURRENCY`    | `25`                                                      | nuclei parallelism (`-c`). Lower it for a slow or fragile target so a run wastes less time waiting on slow responses.            |
 | `SAKUDA_KATANA_BIN`            | `katana` (`/usr/local/bin/katana` in the image)           | Path to the katana binary (discovery's second URL source). Its time budget is the site's spider minutes; no separate knob.       |
 | `SAKUDA_ZAP_CMD`               | `zap.sh` (`/zap/zap.sh` in the image)                     | ZAP entrypoint. Dev on macOS: `./scripts/zap-docker.sh`.                                                                         |
 | `SAKUDA_ZAP_WORKDIR`           | _(unset)_                                                 | Container-side path when ZAP sees the scan work dir at a different path than the host (the dev wrapper mounts it at `/zap/wrk`). |
@@ -160,6 +161,58 @@ outside the team that owns the scanned target.
 live on disk for as long as the site exists, and are deleted (best-effort)
 when the site itself is deleted.
 
+## Scanning — engines and active checks
+
+A scan runs one or more engines against a site; when all three are selected
+they run in this fixed order, each with its own time budget:
+
+1. **ZAP API (active)** — drives ZAP's active scan from the site's OpenAPI
+   spec (`openapiUrl` / `openapiJson`, plus a spec sakuda generates from saved
+   non-GET targets when active checks are on). This is where documented
+   endpoints get injection / redirect / SQLi coverage; the image pins ZAP's
+   `ascanrulesBeta` add-on for NoSQL (MongoDB) and LDAP injection rules.
+2. **ZAP Frontend (baseline)** — traditional + Ajax spiders from the seed
+   page, a passive baseline scan, and a DOM-XSS probe over hash routes. The
+   heaviest engine (it drives a real Firefox); size Docker's RAM as noted
+   above.
+3. **Nuclei** — template scanning against the saved target paths (see
+   [Discovery](#discovery--filling-the-target-list)).
+
+**sakuda sends attack traffic — only scan targets you own or are authorized
+to test.** The ZAP API engine active-scans the documented endpoints on every
+run by design, independent of the toggle below.
+
+**Active injection checks (per site).** This toggle broadens what the engines
+are allowed to attack: mutating-method requests to saved targets, nuclei's
+DAST fuzzing templates (GET and generated non-GET), ZAP's frontend active
+scan, and form-submitting discovery (katana `-aff`, ZAP `postForm`). With it
+off, those are held back. For a target that is not on your own machine, sakuda
+additionally requires you to confirm you are authorized (`nonLocalConfirmed`)
+before active checks take effect. Individual high-risk nuclei template groups
+(known-CVE exploits, command-injection / RCE, denial-of-service) are each
+opted in separately on the site form.
+
+**How nuclei spends its time.** One nuclei run has up to three phases sharing
+`SAKUDA_NUCLEI_MAX_MINUTES`:
+
+1. **DAST** — fuzzing templates on the GET targets (active checks only). Runs
+   first: it is short and catches the high-signal cases (SQLi, command
+   injection).
+2. **Signature** — the `http` template tree on the GET targets. The long
+   phase.
+3. **OpenAPI** — fuzzing the saved non-GET endpoints via a generated spec
+   (active checks only).
+
+Each phase reserves a floor of time for the phases still to come, so a slow
+target can't let one phase consume the whole budget and leave the rest at 0%.
+Lower `SAKUDA_NUCLEI_CONCURRENCY` for a slow target.
+
+**Partial runs are reported honestly.** If an engine hits its time limit it is
+marked _stopped at limit_ rather than shown as a clean finish, and it keeps
+whatever it found up to that point. The scan page shows, per engine, its
+status, elapsed / total time and the limit it ran under, alongside the
+findings, a diff against the previous scan, and a Markdown export.
+
 ## Discovery — filling the target list
 
 Nuclei does not crawl; it scans exactly the **target paths** saved on the
@@ -185,6 +238,14 @@ site (`/path` or `api:/path`, relative to the base URLs). On the site page:
    the list and never duplicates a path.
 3. Start a scan. Nuclei uses the saved list; ZAP frontend still crawls from
    the seed path itself.
+
+**Non-GET endpoints.** With active checks on, discovery also observes the
+value-free _shape_ of the non-GET requests the app makes — a badge like
+`form {email, password}` or `json {email, password}`, never the captured
+values — and you approve those alongside the URLs. sakuda turns the approved
+shapes into a generated OpenAPI spec so nuclei and ZAP API can fuzz those
+endpoints, which is how an authenticated `POST /rest/user/login` becomes
+reachable to injection checks without you hand-writing a spec.
 
 **Single-page apps behind a login.** Header injection authenticates the
 _requests_, but an SPA decides whether it is logged in from what it finds in

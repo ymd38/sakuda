@@ -36,6 +36,22 @@ import {
 /** Least a phase may run before we treat the overall deadline as spent. */
 const MIN_PHASE_MS = 30_000
 
+/**
+ * The wall-clock a nuclei phase may take, given the whole run's remaining
+ * budget and how many phases still follow it. The phases share one budget
+ * and run in sequence (DAST → signature → OpenAPI); a slow earlier phase
+ * must not eat the budget and starve a later one to 0% (#86). Reserve
+ * MIN_PHASE_MS for each phase still to come, and never return below that
+ * floor, so every phase that will run gets at least MIN_PHASE_MS.
+ */
+export function phaseTimeoutMs(
+  remainingMs: number,
+  laterPhaseCount: number,
+  minPhaseMs: number = MIN_PHASE_MS,
+): number {
+  return Math.max(remainingMs - laterPhaseCount * minPhaseMs, minPhaseMs)
+}
+
 interface PhaseOutcome {
   findings: NewFinding[]
   counts: SeverityCounts
@@ -131,6 +147,8 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   })
   const deadline = Date.now() + timeBudget.totalMinutes * 60_000
   const remaining = () => deadline - Date.now()
+  const budgetFor = (laterPhaseCount: number): number =>
+    phaseTimeoutMs(remaining(), laterPhaseCount)
   const findings: NewFinding[] = []
   const counts = emptyCounts()
   const warnings: string[] = []
@@ -172,6 +190,13 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       warnings.push(`${phase.invalidLines} unparsable JSONL line(s) ignored (${label} phase)`)
   }
 
+  // How many nuclei runs will follow the one about to start, so each can
+  // reserve a floor for them (#86). DAST (active only), signature, then one
+  // OpenAPI run per generated doc.
+  const runDast = activeScan && getUrls.length > 0
+  const runSignature = getUrls.length > 0
+  let laterPhases = (runDast ? 1 : 0) + (runSignature ? 1 : 0) + docs.length
+
   // Both GET phases read the same targets file (seeded query values under
   // active checks), so it is written once, ahead of either.
   const targetsFile = join(workDir, 'targets.txt')
@@ -193,7 +218,8 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   // A separate nuclei run because `-dast` is exclusive; same targets file
   // and tag lists as the signature phase, so the risk opt-ins gate it
   // identically.
-  if (activeScan && getUrls.length > 0) {
+  if (runDast) {
+    laterPhases -= 1
     const outputFile = join(workDir, 'dast-findings.jsonl')
     const stdoutPath = join(workDir, 'dast-stdout.log')
     const stderrPath = join(workDir, 'dast-stderr.log')
@@ -202,7 +228,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       dastTemplatesDir: env.nuclei.dastTemplatesDir,
       outputFile,
       rateLimit: site.nucleiRateLimit,
-      concurrency: 25,
+      concurrency: env.nuclei.concurrency,
       tags,
       excludeTags: riskExcludeTags(riskTags),
       headers: site.headers,
@@ -215,7 +241,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       outputFile,
       stdoutPath,
       stderrPath,
-      timeoutMs: Math.max(remaining(), MIN_PHASE_MS),
+      timeoutMs: budgetFor(laterPhases),
       signal,
       logger,
       unalias: unaliasFront,
@@ -230,7 +256,8 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
   // Same argv in both modes except the tag lists; never `-dast`, which
   // would make nuclei run DAST templates only and drop every signature
   // template (#65).
-  if (getUrls.length > 0 && !anAborted) {
+  if (runSignature && !anAborted) {
+    laterPhases -= 1
     if (remaining() <= 0) {
       warnings.push(
         'nuclei was stopped by the engine timeout before the signature phase started; results are partial',
@@ -245,7 +272,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
         templatesDir: env.nuclei.templatesDir,
         outputFile,
         rateLimit: site.nucleiRateLimit,
-        concurrency: 25,
+        concurrency: env.nuclei.concurrency,
         tags,
         headers: site.headers,
         excludeTags: riskExcludeTags(riskTags),
@@ -258,7 +285,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
         outputFile,
         stdoutPath,
         stderrPath,
-        timeoutMs: Math.max(remaining(), MIN_PHASE_MS),
+        timeoutMs: budgetFor(laterPhases),
         signal,
         logger,
         unalias: unaliasFront,
@@ -281,6 +308,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       timedOut = true
       break
     }
+    laterPhases -= 1
     const d = docs[i]!
     const docFile = join(workDir, `openapi-${i}.json`)
     const outputFile = join(workDir, `openapi-findings-${i}.jsonl`)
@@ -298,7 +326,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
         dastTemplatesDir: env.nuclei.dastTemplatesDir,
         outputFile,
         rateLimit: site.nucleiRateLimit,
-        concurrency: 25,
+        concurrency: env.nuclei.concurrency,
         headers: site.headers,
       })
       const phase = await runNucleiPhase({
@@ -309,7 +337,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
         outputFile,
         stdoutPath,
         stderrPath,
-        timeoutMs: Math.max(remaining(), MIN_PHASE_MS),
+        timeoutMs: budgetFor(laterPhases),
         signal,
         logger,
         unalias: (u) => restoreLoopbackHost(u, localAlias, d.originalHost),
@@ -378,7 +406,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       ...(docs.length > 0 ? { openapiDocCount: docs.length, openapiDocsRun } : {}),
       tags,
       rateLimit: site.nucleiRateLimit,
-      concurrency: 25,
+      concurrency: env.nuclei.concurrency,
       templatesDir: env.nuclei.templatesDir,
       activeScan,
       riskTags,

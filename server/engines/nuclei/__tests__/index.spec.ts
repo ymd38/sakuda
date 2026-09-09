@@ -370,7 +370,11 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     tmp = mkdtempSync(join(tmpdir(), 'sakuda-nuclei-dast-'))
   })
 
-  async function run(site: SiteWithHeaders, fake = FAKE_RECORD_ARGS) {
+  async function run(
+    site: SiteWithHeaders,
+    fake = FAKE_RECORD_ARGS,
+    extraEnv: Record<string, string> = {},
+  ) {
     const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', fake)
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
@@ -378,6 +382,7 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
       SAKUDA_DATA_DIR: tmp,
       SAKUDA_NUCLEI_TEMPLATES: '/tpl/http',
       SAKUDA_NUCLEI_DAST_TEMPLATES: '/tpl/dast',
+      ...extraEnv,
     })
     const workDir = join(tmp, 'work')
     const out = await runNuclei({
@@ -453,6 +458,19 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     expect(out.meta.dastPhase).toBe('empty')
     expect(out.meta.parameterizedUrlCount).toBe(1)
     expect(out.warnings).toEqual([])
+  })
+
+  it('passes the env concurrency to every phase and records it in meta (#86)', async () => {
+    const { out, argv, dastArgv } = await run(
+      baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=' }),
+      FAKE_RECORD_ARGS,
+      { SAKUDA_NUCLEI_CONCURRENCY: '8' },
+    )
+    const cValue = (a: string[]) => a[a.indexOf('-c') + 1]
+    expect(cValue(argv)).toBe('8')
+    expect(dastArgv).not.toBeNull()
+    expect(cValue(dastArgv!)).toBe('8')
+    expect(out.meta.concurrency).toBe(8)
   })
 
   it('opts a risk group back in: both GET phases drop it from -exclude-tags and gain its extra -tags', async () => {
