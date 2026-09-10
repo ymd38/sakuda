@@ -11,6 +11,8 @@
 #   - NUCLEI_TEMPLATES_TAG: v10.4.8 (github.com/projectdiscovery/nuclei-templates latest release)
 #   - KATANA_VERSION: 1.7.0 (github.com/projectdiscovery/katana latest release)
 #   - DALFOX_VERSION: 3.2.2 (github.com/hahwul/dalfox latest release)
+#   - HTTPX_VERSION: 1.12.0 (github.com/projectdiscovery/httpx latest release; ≥1.12 runs its
+#     page-type classifier — and downloads its model — only with `-kb`, which sakuda never passes)
 #   - ASCANRULES_BETA_VERSION: 64 (zap-extensions ascanrulesBeta-v64, requires ZAP>=2.17.0)
 ARG ZAP_VERSION=2.17.0
 ARG NODE_VERSION=22.23.2
@@ -18,6 +20,7 @@ ARG NUCLEI_VERSION=3.11.1
 ARG NUCLEI_TEMPLATES_TAG=v10.4.8
 ARG KATANA_VERSION=1.7.0
 ARG DALFOX_VERSION=3.2.2
+ARG HTTPX_VERSION=1.12.0
 ARG ASCANRULES_BETA_VERSION=64
 
 FROM node:${NODE_VERSION}-bookworm-slim AS build
@@ -35,7 +38,7 @@ COPY . .
 RUN pnpm build
 
 FROM ghcr.io/zaproxy/zaproxy:${ZAP_VERSION}
-ARG ZAP_VERSION NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG KATANA_VERSION DALFOX_VERSION ASCANRULES_BETA_VERSION TARGETARCH
+ARG ZAP_VERSION NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG KATANA_VERSION DALFOX_VERSION HTTPX_VERSION ASCANRULES_BETA_VERSION TARGETARCH
 USER root
 
 # ZAP's Debian base already ships curl, unzip and git; if that ever changes,
@@ -77,6 +80,14 @@ RUN set -eux; arch="$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64
     tar -xzf "${f}" --strip-components=1 -C /usr/local/bin "dalfox-v${DALFOX_VERSION}-linux-${arch}/dalfox"; \
     chmod 755 /usr/local/bin/dalfox; rm -f dalfox-*
 
+# httpx (checksum-verified; nuclei's pre-scan liveness probe, #91). Same asset
+# naming as nuclei's (`httpx_<ver>_checksums.txt`).
+RUN set -eux; \
+    curl -fsSLO "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_${TARGETARCH}.zip"; \
+    curl -fsSLO "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_checksums.txt"; \
+    grep "httpx_${HTTPX_VERSION}_linux_${TARGETARCH}.zip" "httpx_${HTTPX_VERSION}_checksums.txt" | sha256sum -c -; \
+    unzip -o "httpx_${HTTPX_VERSION}_linux_${TARGETARCH}.zip" httpx -d /usr/local/bin; chmod 755 /usr/local/bin/httpx; rm -f httpx_*
+
 # ZAP ascanrulesBeta add-on (NoSQL(MongoDB)/LDAP injection active scan rules).
 # Pinned by version + SHA-256 and dropped into /zap/plugin/ so ZAP loads it at
 # startup without any runtime marketplace fetch (offline / reproducible, per
@@ -109,6 +120,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 HOME=/home/zap \
     SAKUDA_NUCLEI_BIN=/usr/local/bin/nuclei SAKUDA_NUCLEI_TEMPLATES=/opt/nuclei-templates/http \
     SAKUDA_NUCLEI_DAST_TEMPLATES=/opt/nuclei-templates/dast \
     SAKUDA_KATANA_BIN=/usr/local/bin/katana SAKUDA_DALFOX_BIN=/usr/local/bin/dalfox \
+    SAKUDA_HTTPX_BIN=/usr/local/bin/httpx \
     SAKUDA_ZAP_CMD=/zap/zap.sh SAKUDA_LOCALHOST_ALIAS=host.docker.internal
 EXPOSE 3000
 VOLUME ["/data"]

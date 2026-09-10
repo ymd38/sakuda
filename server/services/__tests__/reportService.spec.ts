@@ -22,7 +22,7 @@ let db: Db
 let siteDeps: SiteServiceDeps
 let n = 0
 const detailDeps = {
-  env: { nucleiMaxMinutes: 60, engineGraceMinutes: 10 },
+  env: { nucleiMaxMinutes: 60, httpxMaxMinutes: 5, dalfoxMaxMinutes: 10, engineGraceMinutes: 10 },
   now: () => new Date('2026-01-01T00:07:00Z'),
 }
 
@@ -323,8 +323,11 @@ describe('reportService', () => {
       const detail = getScanDetail(db, 'scan-1', detailDeps)
       const [nuclei, zapFe] = detail?.engineRuns ?? []
       expect(nuclei?.limits).toEqual({
-        parts: [{ label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: 60 }],
-        totalMinutes: 60,
+        parts: [
+          { label: 'httpx probe (SAKUDA_HTTPX_MAX_MINUTES)', minutes: 5 },
+          { label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: 60 },
+        ],
+        totalMinutes: 65,
         estimated: true,
       })
       // snapshot: spider 5 min ×2, passive 5, grace 10, DOM probe 10 (it ran), no active scan

@@ -10,6 +10,8 @@ export type TimeBudgetSite = Pick<SitePublic, 'zapApiMaxMinutes' | 'zapFeSpiderM
 export interface TimeBudgetEnv {
   nucleiMaxMinutes: number
   dalfoxMaxMinutes: number
+  /** The httpx liveness probe that runs ahead of nuclei's phases (#91). */
+  httpxMaxMinutes: number
   engineGraceMinutes: number
 }
 export interface TimeBudgetFlags {
@@ -21,10 +23,11 @@ export interface TimeBudgetFlags {
 
 /** The env fields the budget depends on, picked from the validated env. */
 export function timeBudgetEnv(
-  env: Pick<Env, 'nuclei' | 'dalfox' | 'engineGraceMinutes'>,
+  env: Pick<Env, 'nuclei' | 'httpx' | 'dalfox' | 'engineGraceMinutes'>,
 ): TimeBudgetEnv {
   return {
     nucleiMaxMinutes: env.nuclei.maxMinutes,
+    httpxMaxMinutes: env.httpx.maxMinutes,
     dalfoxMaxMinutes: env.dalfox.maxMinutes,
     engineGraceMinutes: env.engineGraceMinutes,
   }
@@ -36,8 +39,9 @@ export function timeBudgetEnv(
  * the whole budget in `meta.timeBudget`, and the scan API reads that back,
  * so what the page shows as the limit is exactly what the runner enforced.
  *
- * - nuclei: its own deadline, `SAKUDA_NUCLEI_MAX_MINUTES`, shared by every
- *   phase; no grace, the engine stops itself.
+ * - nuclei: the httpx liveness probe's cap (`SAKUDA_HTTPX_MAX_MINUTES`) plus
+ *   its own deadline, `SAKUDA_NUCLEI_MAX_MINUTES`, shared by every phase; no
+ *   grace, the engine stops itself.
  * - zap-api: the site's active-scan cap + the passive tail + the grace ZAP
  *   gets to shut down.
  * - zap-fe: two spider runs (traditional + ajax) + the active scan under
@@ -53,7 +57,10 @@ export function engineTimeBudget(
   const parts: EngineTimeBudgetPart[] = []
   switch (engine) {
     case 'nuclei':
-      parts.push({ label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: env.nucleiMaxMinutes })
+      parts.push(
+        { label: 'httpx probe (SAKUDA_HTTPX_MAX_MINUTES)', minutes: env.httpxMaxMinutes },
+        { label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: env.nucleiMaxMinutes },
+      )
       break
     case 'zap-api':
       parts.push(

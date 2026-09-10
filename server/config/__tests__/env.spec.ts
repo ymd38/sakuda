@@ -22,6 +22,7 @@ describe('parseEnv', () => {
     expect(env.nuclei.templatesDir).toBe('/opt/nuclei-templates/http')
     expect(env.nuclei.dastTemplatesDir).toBe('/opt/nuclei-templates/dast')
     expect(env.katana.bin).toBe('katana')
+    expect(env.httpx).toEqual({ bin: 'httpx', maxMinutes: 5, pruneStatusCodes: [] })
     expect(env.zap.cmd).toBe('zap.sh')
     expect(env.jobRunner).toBe(true)
   })
@@ -97,5 +98,26 @@ describe('SAKUDA_NUCLEI_DAST_TEMPLATES', () => {
     expect(() =>
       parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_NUCLEI_DAST_TEMPLATES: '   ' }),
     ).toThrow(/SAKUDA_NUCLEI_DAST_TEMPLATES must not be empty/)
+  })
+  describe('SAKUDA_HTTPX_PRUNE_STATUS_CODES (#91)', () => {
+    it('is off (empty) by default and on an empty value', () => {
+      expect(parseEnv({ SAKUDA_ENCRYPTION_KEY: key }).httpx.pruneStatusCodes).toEqual([])
+      expect(
+        parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_HTTPX_PRUNE_STATUS_CODES: ' ' }).httpx
+          .pruneStatusCodes,
+      ).toEqual([])
+    })
+    it('parses a comma-separated list of 4xx codes', () => {
+      expect(
+        parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_HTTPX_PRUNE_STATUS_CODES: '404, 410' }).httpx
+          .pruneStatusCodes,
+      ).toEqual([404, 410])
+    })
+    it('fails fast on a code that is never evidence of a dead path (405, 429, 5xx, 2xx)', () => {
+      for (const v of ['405', '429', '500', '200', '404,503', 'abc'])
+        expect(() =>
+          parseEnv({ SAKUDA_ENCRYPTION_KEY: key, SAKUDA_HTTPX_PRUNE_STATUS_CODES: v }),
+        ).toThrow(EnvError)
+    })
   })
 })

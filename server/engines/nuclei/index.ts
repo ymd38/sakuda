@@ -24,6 +24,7 @@ import {
   type NewFinding,
 } from '../types'
 import { buildNucleiArgs, buildNucleiDastArgs, buildNucleiOpenapiArgs, nucleiTagsFor } from './args'
+import { probeTargets, type HttpxProbeMeta } from './httpx'
 import {
   normalizeNucleiLines,
   parseNucleiJsonl,
@@ -192,21 +193,51 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
 
   // How many nuclei runs will follow the one about to start, so each can
   // reserve a floor for them (#86). DAST (active only), signature, then one
-  // OpenAPI run per generated doc.
-  const runDast = activeScan && getUrls.length > 0
-  const runSignature = getUrls.length > 0
-  let laterPhases = (runDast ? 1 : 0) + (runSignature ? 1 : 0) + docs.length
+  // OpenAPI run per generated doc. An upper bound until the probe below has
+  // said which GET targets remain; recomputed right after it.
+  let laterPhases =
+    (activeScan && getUrls.length > 0 ? 1 : 0) + (getUrls.length > 0 ? 1 : 0) + docs.length
 
-  // Both GET phases read the same targets file (seeded query values under
-  // active checks), so it is written once, ahead of either.
+  // --- pre-flight: httpx liveness probe over the GET list (#91) -----------
+  // The exact lines nuclei is about to read (seeded query values under
+  // active checks, host alias applied) are probed once. By default nothing
+  // is dropped — the probe only annotates `meta.httpx` — and any trouble on
+  // httpx's side passes the whole list through with a warning. Its time is
+  // part of this run's budget (the budget carries an httpx part) and is
+  // capped so every nuclei phase keeps its floor.
+  // Both GET phases read the same targets file, so it is written once here.
   const targetsFile = join(workDir, 'targets.txt')
+  let httpxMeta: HttpxProbeMeta | null = null
+  let liveGetUrls: string[] = []
   if (getUrls.length > 0) {
-    const targetUrls = activeScan ? seedEmptyQueryValues(getUrls) : getUrls
-    await writeFile(
-      targetsFile,
-      targetUrls.map((u) => rewriteLoopbackHost(u, localAlias)).join('\n') + '\n',
+    const targetUrls = (activeScan ? seedEmptyQueryValues(getUrls) : getUrls).map((u) =>
+      rewriteLoopbackHost(u, localAlias),
     )
+    const probe = await probeTargets({
+      scanId,
+      targetUrls,
+      workDir,
+      bin: env.httpx.bin,
+      timeoutMs: Math.min(env.httpx.maxMinutes * 60_000, budgetFor(laterPhases)),
+      threads: env.nuclei.concurrency,
+      rateLimit: site.nucleiRateLimit,
+      headers: site.headers,
+      pruneStatusCodes: env.httpx.pruneStatusCodes,
+      signal,
+      logger,
+    })
+    warnings.push(...probe.warnings)
+    httpxMeta = probe.meta
+    liveGetUrls = probe.kept
+    if (liveGetUrls.length > 0) await writeFile(targetsFile, liveGetUrls.join('\n') + '\n')
+    else
+      warnings.push(
+        'httpx pruned every GET target (SAKUDA_HTTPX_PRUNE_STATUS_CODES), so the DAST and signature phases were skipped',
+      )
   }
+  const runDast = activeScan && liveGetUrls.length > 0
+  const runSignature = liveGetUrls.length > 0
+  laterPhases = (runDast ? 1 : 0) + (runSignature ? 1 : 0) + docs.length
 
   // --- phase 1a: GET URL list, DAST templates (active checks only) --------
   // Runs FIRST: the DAST tree is ~20 templates and finishes in well under a
@@ -401,6 +432,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
     meta: {
       urlCount: getUrls.length,
       excludedUrls: excluded,
+      ...(httpxMeta ? { httpx: httpxMeta } : {}),
       ...(Object.keys(skippedMethods).length > 0 ? { skippedMethods } : {}),
       ...(Object.keys(skippedNoFuzzSeed).length > 0 ? { skippedNoFuzzSeed } : {}),
       ...(docs.length > 0 ? { openapiDocCount: docs.length, openapiDocsRun } : {}),

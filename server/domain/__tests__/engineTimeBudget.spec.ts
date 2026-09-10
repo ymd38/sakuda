@@ -8,17 +8,25 @@ import {
 } from '../engineTimeBudget'
 
 const site = { zapApiMaxMinutes: 45, zapFeSpiderMaxMinutes: 5 }
-const env = { nucleiMaxMinutes: 60, engineGraceMinutes: 10 }
+const env = {
+  nucleiMaxMinutes: 60,
+  httpxMaxMinutes: 5,
+  dalfoxMaxMinutes: 10,
+  engineGraceMinutes: 10,
+}
 const off = { activeScan: false, domXssProbe: false }
 
 describe('engineTimeBudget (#84)', () => {
-  it('nuclei: the env cap alone, whatever the active flag', () => {
+  it('nuclei: the httpx probe cap + the env cap, whatever the active flag (#91)', () => {
     expect(engineTimeBudget('nuclei', site, env, off)).toEqual({
-      parts: [{ label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: 60 }],
-      totalMinutes: 60,
+      parts: [
+        { label: 'httpx probe (SAKUDA_HTTPX_MAX_MINUTES)', minutes: 5 },
+        { label: 'nuclei (SAKUDA_NUCLEI_MAX_MINUTES)', minutes: 60 },
+      ],
+      totalMinutes: 65,
     })
     expect(engineTimeBudget('nuclei', site, env, { ...off, activeScan: true }).totalMinutes).toBe(
-      60,
+      65,
     )
   })
 
@@ -54,10 +62,16 @@ describe('engineTimeBudget (#84)', () => {
     expect(
       timeBudgetEnv({
         nuclei: { bin: 'nuclei', templatesDir: '/t', dastTemplatesDir: '/d', maxMinutes: 30 },
+        httpx: { bin: 'httpx', maxMinutes: 3, pruneStatusCodes: [] },
         dalfox: { bin: 'dalfox', maxMinutes: 12, concurrency: 10, maxTargets: 50 },
         engineGraceMinutes: 7,
       }),
-    ).toEqual({ nucleiMaxMinutes: 30, dalfoxMaxMinutes: 12, engineGraceMinutes: 7 })
+    ).toEqual({
+      nucleiMaxMinutes: 30,
+      httpxMaxMinutes: 3,
+      dalfoxMaxMinutes: 12,
+      engineGraceMinutes: 7,
+    })
   })
 })
 

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
@@ -46,6 +46,25 @@ function writeFakeBin(dir: string, name: string, content: string): string {
 
 const key = randomBytes(32).toString('base64')
 
+// The probe ahead of nuclei (#91) must not spawn a real httpx from PATH in a
+// unit test. Every run here gets this fake, which reports 200 for each input
+// (so the run's warnings stay exactly what nuclei produced); the #91 tests
+// below swap in their own fakes and a missing binary.
+const FAKE_HTTPX_OK = `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+for (const input of fs.readFileSync(args[args.indexOf('-l') + 1], 'utf8').trim().split('\\n'))
+  console.log(JSON.stringify({ input, status_code: 200, failed: false }))
+`
+const FAKE_HTTPX_ENV = {
+  SAKUDA_HTTPX_BIN: writeFakeBin(
+    mkdtempSync(join(tmpdir(), 'sakuda-httpx-ok-')),
+    'fake-httpx-ok.js',
+    FAKE_HTTPX_OK,
+  ),
+}
+const NO_HTTPX = { SAKUDA_HTTPX_BIN: '/nonexistent/sakuda-test/httpx' }
+
 function baseSite(overrides: Partial<SiteWithHeaders> = {}): SiteWithHeaders {
   return {
     id: 'site-1',
@@ -89,6 +108,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'work')
@@ -118,6 +138,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
       SAKUDA_LOCALHOST_ALIAS: 'host.docker.internal',
     })
@@ -142,6 +163,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'work')
@@ -163,6 +185,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'work')
@@ -186,6 +209,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'work')
@@ -209,6 +233,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'skip')
@@ -236,6 +261,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'same-url')
@@ -264,6 +290,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'active')
@@ -300,6 +327,7 @@ describe('runNuclei', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     await expect(
@@ -379,6 +407,7 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
       SAKUDA_NUCLEI_TEMPLATES: '/tpl/http',
       SAKUDA_NUCLEI_DAST_TEMPLATES: '/tpl/dast',
@@ -586,6 +615,7 @@ describe('runNuclei partial phase detection (#82)', () => {
     const env: Env = parseEnv({
       SAKUDA_ENCRYPTION_KEY: key,
       SAKUDA_NUCLEI_BIN: fakeBin,
+      ...FAKE_HTTPX_ENV,
       SAKUDA_DATA_DIR: tmp,
     })
     const workDir = join(tmp, 'work')
@@ -629,5 +659,165 @@ describe('runNuclei partial phase detection (#82)', () => {
     const out = await run({ FAKE_PERCENT: '100' })
     expect(out.meta.signaturePhase).toBe('ok')
     expect(out.warnings).toEqual([])
+  })
+})
+
+// Fake httpx: reads `-l`, prints one `-probe`-style JSONL line per input to
+// stdout. A line whose path ends in `/gone` gets 404, `/down` a transport
+// failure, `/silent` no line at all, anything else 200. Records argv next to
+// the targets file.
+const FAKE_HTTPX = `#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+const args = process.argv.slice(2)
+const targetsFile = args[args.indexOf('-l') + 1]
+fs.writeFileSync(path.join(path.dirname(targetsFile), 'argv.json'), JSON.stringify(args))
+for (const input of fs.readFileSync(targetsFile, 'utf8').trim().split('\\n')) {
+  const p = new URL(input).pathname
+  if (p.endsWith('/silent')) continue
+  if (p.endsWith('/down')) { console.log(JSON.stringify({ input, status_code: 0, failed: true, error: 'connection refused' })); continue }
+  console.log(JSON.stringify({ input, url: input, status_code: p.endsWith('/gone') ? 404 : 200, failed: false }))
+}
+process.exit(0)
+`
+
+const FAKE_HTTPX_CRASHES = `#!/usr/bin/env node
+console.error('boom')
+process.exit(1)
+`
+
+describe('runNuclei httpx liveness probe (#91)', () => {
+  let tmp: string
+  const logger = pino({ level: 'silent' })
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'sakuda-nuclei-httpx-'))
+  })
+
+  async function run(
+    site: SiteWithHeaders,
+    fakeHttpx: string | null,
+    extraEnv: Record<string, string> = {},
+  ) {
+    const fakeBin = writeFakeBin(tmp, 'fake-nuclei.js', FAKE_RECORD_ARGS)
+    const httpxBin =
+      fakeHttpx === null ? NO_HTTPX.SAKUDA_HTTPX_BIN : writeFakeBin(tmp, 'fake-httpx.js', fakeHttpx)
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_NUCLEI_BIN: fakeBin,
+      SAKUDA_HTTPX_BIN: httpxBin,
+      SAKUDA_DATA_DIR: tmp,
+      ...extraEnv,
+    })
+    const workDir = join(tmp, 'work')
+    const out = await runNuclei({
+      scanId: 'scan-httpx',
+      engine: 'nuclei',
+      site,
+      workDir,
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+    const targets = existsSync(join(workDir, 'targets.txt'))
+      ? readFileSync(join(workDir, 'targets.txt'), 'utf8')
+      : null
+    const httpxDir = join(workDir, 'httpx')
+    // as: written by the fake httpx above as JSON string[]
+    const httpxArgv = existsSync(join(httpxDir, 'argv.json'))
+      ? (JSON.parse(readFileSync(join(httpxDir, 'argv.json'), 'utf8')) as string[])
+      : null
+    // as: meta.httpx is the probe's typed meta, opaque to EngineOutput
+    const httpx = out.meta.httpx as Record<string, unknown> | undefined
+    return { out, targets, httpxDir, httpxArgv, httpx }
+  }
+
+  const site = () =>
+    baseSite({
+      nucleiPaths: '/ok\n/gone\n/down\n/silent',
+      headers: [{ name: 'Authorization', value: 'Bearer secret-token' }],
+    })
+
+  it('by default keeps every target — a 404 stays in the nuclei list — and only annotates meta', async () => {
+    const { out, targets, httpx } = await run(site(), FAKE_HTTPX)
+    expect(targets).toBe(
+      'http://localhost:3001/ok\nhttp://localhost:3001/gone\nhttp://localhost:3001/down\nhttp://localhost:3001/silent\n',
+    )
+    expect(httpx).toMatchObject({
+      status: 'ok',
+      inputCount: 4,
+      observedCount: 3,
+      unobservedCount: 1,
+      failedCount: 1,
+      keptCount: 4,
+      droppedCount: 0,
+      droppedUrls: [],
+      statusCounts: { '200': 1, '404': 1 },
+      pruneStatusCodes: [],
+      exitCode: 0,
+    })
+    expect(out.warnings).toEqual([])
+    expect(out.meta.urlCount).toBe(4)
+  })
+
+  it('writes its artifacts under nuclei/httpx/ (0600) with header values masked in args.json', async () => {
+    const { httpxDir, httpxArgv } = await run(site(), FAKE_HTTPX)
+    for (const f of ['targets.txt', 'stdout.jsonl', 'stderr.log', 'args.json']) {
+      const p = join(httpxDir, f)
+      expect(existsSync(p), f).toBe(true)
+      expect(statSync(p).mode & 0o777, f).toBe(0o600)
+    }
+    // the real argv carried the header; the persisted one does not
+    expect(httpxArgv).toContain('Authorization: Bearer secret-token')
+    expect(httpxArgv).not.toContain('-fr')
+    expect(httpxArgv).toContain('-nfs')
+    expect(httpxArgv).toContain('-probe')
+    const persisted = readFileSync(join(httpxDir, 'args.json'), 'utf8')
+    expect(persisted).toContain('Authorization: ***')
+    expect(persisted).not.toContain('secret-token')
+    expect(readFileSync(join(httpxDir, 'stdout.jsonl'), 'utf8')).toContain('"status_code":404')
+  })
+
+  it('with the opt-in drops only the target httpx positively saw on the list; unknown stays', async () => {
+    const { targets, httpx, out } = await run(site(), FAKE_HTTPX, {
+      SAKUDA_HTTPX_PRUNE_STATUS_CODES: '404,410',
+    })
+    expect(targets).toBe(
+      'http://localhost:3001/ok\nhttp://localhost:3001/down\nhttp://localhost:3001/silent\n',
+    )
+    expect(httpx).toMatchObject({
+      keptCount: 3,
+      droppedCount: 1,
+      droppedUrls: ['http://localhost:3001/gone'],
+      pruneStatusCodes: [404, 410],
+    })
+    expect(out.warnings).toEqual([expect.stringMatching(/httpx pruned 1 target/)])
+  })
+
+  it('passes every target through with a warning when httpx is not installed', async () => {
+    const { targets, httpx, out } = await run(site(), null, {
+      SAKUDA_HTTPX_PRUNE_STATUS_CODES: '404',
+    })
+    expect(targets!.split('\n').filter(Boolean)).toHaveLength(4)
+    expect(httpx).toMatchObject({ status: 'unavailable', keptCount: 4, droppedCount: 0 })
+    expect(out.warnings).toEqual([expect.stringMatching(/httpx liveness probe did not run/)])
+    expect(out.meta.signaturePhase).toBe('empty')
+  })
+
+  it('passes every target through with a warning when httpx fails', async () => {
+    const { targets, httpx, out } = await run(site(), FAKE_HTTPX_CRASHES, {
+      SAKUDA_HTTPX_PRUNE_STATUS_CODES: '404',
+    })
+    expect(targets!.split('\n').filter(Boolean)).toHaveLength(4)
+    expect(httpx).toMatchObject({ status: 'failed', exitCode: 1, keptCount: 4 })
+    expect(out.warnings).toEqual([expect.stringMatching(/httpx liveness probe failed \(exit 1/)])
+  })
+
+  it('records the probe in the run budget the page shows (#84)', async () => {
+    const { out } = await run(site(), FAKE_HTTPX, { SAKUDA_HTTPX_MAX_MINUTES: '2' })
+    expect(out.meta.timeBudget).toMatchObject({
+      parts: [expect.objectContaining({ minutes: 2 }), expect.objectContaining({ minutes: 60 })],
+      totalMinutes: 62,
+    })
   })
 })

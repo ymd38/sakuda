@@ -32,6 +32,31 @@ const optionalString = z.preprocess(
   z.string().optional(),
 )
 
+/** `404,410` → `[404, 410]`; empty/unset → `[]` (the probe annotates only).
+ * Only a 4xx other than 405/429 may be listed: a 405 (method refused), 429
+ * (throttled), 5xx (server down) or 2xx/3xx is never evidence that nuclei
+ * would find nothing there, so listing one is a config mistake, not an
+ * opt-in — fail fast (#91). */
+const pruneStatusCodes = z.preprocess(
+  (v) =>
+    typeof v === 'string'
+      ? v
+          .split(',')
+          .map((c) => c.trim())
+          .filter((c) => c !== '')
+      : v,
+  z
+    .array(
+      z.coerce
+        .number()
+        .int()
+        .min(400)
+        .max(499)
+        .refine((c) => c !== 405 && c !== 429, 'must not be 405 or 429'),
+    )
+    .default([]),
+)
+
 const EnvSchema = z.object({
   SAKUDA_ENCRYPTION_KEY: z
     .string({
@@ -59,6 +84,9 @@ const EnvSchema = z.object({
   // aimed at a curated saved-target list, not a large recon dump.
   SAKUDA_DALFOX_CONCURRENCY: z.coerce.number().int().positive().default(10),
   SAKUDA_DALFOX_MAX_TARGETS: z.coerce.number().int().positive().default(50),
+  SAKUDA_HTTPX_BIN: z.string().default('httpx'),
+  SAKUDA_HTTPX_MAX_MINUTES: z.coerce.number().int().positive().default(5),
+  SAKUDA_HTTPX_PRUNE_STATUS_CODES: pruneStatusCodes,
   SAKUDA_ZAP_CMD: z.string().default('zap.sh'),
   SAKUDA_ZAP_WORKDIR: optionalString,
   SAKUDA_ZAP_MAX_HEAP: z
@@ -95,6 +123,14 @@ export interface Env {
     maxMinutes: number
     concurrency: number
     maxTargets: number
+  }
+  /** nuclei's pre-scan liveness probe (#91): one GET per target before the
+   * targets file is written. Annotates by default; drops a target only for a
+   * status listed in `pruneStatusCodes` (opt-in, empty by default). */
+  httpx: {
+    bin: string
+    maxMinutes: number
+    pruneStatusCodes: number[]
   }
   zap: {
     cmd: string
@@ -137,6 +173,11 @@ export function parseEnv(raw: NodeJS.ProcessEnv): Env {
       maxMinutes: v.SAKUDA_DALFOX_MAX_MINUTES,
       concurrency: v.SAKUDA_DALFOX_CONCURRENCY,
       maxTargets: v.SAKUDA_DALFOX_MAX_TARGETS,
+    },
+    httpx: {
+      bin: resolveExecutablePath(v.SAKUDA_HTTPX_BIN),
+      maxMinutes: v.SAKUDA_HTTPX_MAX_MINUTES,
+      pruneStatusCodes: v.SAKUDA_HTTPX_PRUNE_STATUS_CODES,
     },
     zap: {
       cmd: resolveExecutablePath(v.SAKUDA_ZAP_CMD),
