@@ -10,12 +10,14 @@
 #   - NUCLEI_VERSION: 3.11.1 (github.com/projectdiscovery/nuclei latest release)
 #   - NUCLEI_TEMPLATES_TAG: v10.4.8 (github.com/projectdiscovery/nuclei-templates latest release)
 #   - KATANA_VERSION: 1.7.0 (github.com/projectdiscovery/katana latest release)
+#   - DALFOX_VERSION: 3.2.2 (github.com/hahwul/dalfox latest release)
 #   - ASCANRULES_BETA_VERSION: 64 (zap-extensions ascanrulesBeta-v64, requires ZAP>=2.17.0)
 ARG ZAP_VERSION=2.17.0
 ARG NODE_VERSION=22.23.2
 ARG NUCLEI_VERSION=3.11.1
 ARG NUCLEI_TEMPLATES_TAG=v10.4.8
 ARG KATANA_VERSION=1.7.0
+ARG DALFOX_VERSION=3.2.2
 ARG ASCANRULES_BETA_VERSION=64
 
 FROM node:${NODE_VERSION}-bookworm-slim AS build
@@ -33,7 +35,7 @@ COPY . .
 RUN pnpm build
 
 FROM ghcr.io/zaproxy/zaproxy:${ZAP_VERSION}
-ARG ZAP_VERSION NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG KATANA_VERSION ASCANRULES_BETA_VERSION TARGETARCH
+ARG ZAP_VERSION NODE_VERSION NUCLEI_VERSION NUCLEI_TEMPLATES_TAG KATANA_VERSION DALFOX_VERSION ASCANRULES_BETA_VERSION TARGETARCH
 USER root
 
 # ZAP's Debian base already ships curl, unzip and git; if that ever changes,
@@ -63,6 +65,17 @@ RUN set -eux; \
     curl -fsSLO "https://github.com/projectdiscovery/katana/releases/download/v${KATANA_VERSION}/katana-${KATANA_VERSION}-checksums.txt"; \
     grep "katana_${KATANA_VERSION}_linux_${TARGETARCH}.zip" "katana-${KATANA_VERSION}-checksums.txt" | sha256sum -c -; \
     unzip -o "katana_${KATANA_VERSION}_linux_${TARGETARCH}.zip" katana -d /usr/local/bin; chmod 755 /usr/local/bin/katana; rm -f katana_* katana-*
+
+# dalfox (checksum-verified; the reflected/DOM XSS engine). Rust build,
+# glibc tarball (not -musl) to match the Debian ZAP base. TARGETARCH
+# amd64->x86_64, arm64->aarch64; the binary sits one dir deep in the tar.
+RUN set -eux; arch="$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64)"; \
+    f="dalfox-v${DALFOX_VERSION}-linux-${arch}.tar.gz"; \
+    curl -fsSLO "https://github.com/hahwul/dalfox/releases/download/v${DALFOX_VERSION}/${f}"; \
+    curl -fsSLO "https://github.com/hahwul/dalfox/releases/download/v${DALFOX_VERSION}/${f}.sha256"; \
+    sha256sum -c "${f}.sha256"; \
+    tar -xzf "${f}" --strip-components=1 -C /usr/local/bin "dalfox-v${DALFOX_VERSION}-linux-${arch}/dalfox"; \
+    chmod 755 /usr/local/bin/dalfox; rm -f dalfox-*
 
 # ZAP ascanrulesBeta add-on (NoSQL(MongoDB)/LDAP injection active scan rules).
 # Pinned by version + SHA-256 and dropped into /zap/plugin/ so ZAP loads it at
@@ -95,7 +108,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 HOME=/home/zap \
     SAKUDA_DATA_DIR=/data SAKUDA_MIGRATIONS_DIR=/app/migrations \
     SAKUDA_NUCLEI_BIN=/usr/local/bin/nuclei SAKUDA_NUCLEI_TEMPLATES=/opt/nuclei-templates/http \
     SAKUDA_NUCLEI_DAST_TEMPLATES=/opt/nuclei-templates/dast \
-    SAKUDA_KATANA_BIN=/usr/local/bin/katana \
+    SAKUDA_KATANA_BIN=/usr/local/bin/katana SAKUDA_DALFOX_BIN=/usr/local/bin/dalfox \
     SAKUDA_ZAP_CMD=/zap/zap.sh SAKUDA_LOCALHOST_ALIAS=host.docker.internal
 EXPOSE 3000
 VOLUME ["/data"]

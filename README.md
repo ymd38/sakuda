@@ -2,8 +2,9 @@
 
 A self-hosted DAST (dynamic application security testing) app. Register a
 **site**, run scans against it with **nuclei**, **ZAP API** (active scan
-against an OpenAPI spec) and/or **ZAP frontend** (spider + baseline against a
-seed page), and browse the results from the UI: per-engine findings, a
+against an OpenAPI spec), **ZAP frontend** (spider + baseline against a
+seed page) and/or **Dalfox** (bounded reflected/DOM XSS), and browse the
+results from the UI: per-engine findings, a
 diff against the previous scan, Markdown export, and history charts.
 **Discovery** is separate from scanning: ZAP's spider crawls the site, you
 review the URLs it found and save the ones you want as target paths, and
@@ -89,6 +90,10 @@ Override per invocation with `make up SAKUDA_PORT=3005`.
 | `SAKUDA_NUCLEI_MAX_MINUTES`    | `60`                                                      | Hard timeout for a nuclei run, shared across its phases (DAST / signature / OpenAPI).                                            |
 | `SAKUDA_NUCLEI_CONCURRENCY`    | `25`                                                      | nuclei parallelism (`-c`). Lower it for a slow or fragile target so a run wastes less time waiting on slow responses.            |
 | `SAKUDA_KATANA_BIN`            | `katana` (`/usr/local/bin/katana` in the image)           | Path to the katana binary (discovery's second URL source). Its time budget is the site's spider minutes; no separate knob.       |
+| `SAKUDA_DALFOX_BIN`            | `dalfox` (`/usr/local/bin/dalfox` in the image)           | Path to the dalfox binary (the reflected/DOM XSS engine). Runs only under active injection checks.                               |
+| `SAKUDA_DALFOX_MAX_MINUTES`    | `10`                                                      | Wall-clock budget for one dalfox run.                                                                                            |
+| `SAKUDA_DALFOX_CONCURRENCY`    | `10`                                                      | dalfox parallelism (workers / concurrent targets). Kept small — it scans a curated target list, not a recon dump.                |
+| `SAKUDA_DALFOX_MAX_TARGETS`    | `50`                                                      | Cap on how many saved GET targets one dalfox run consumes.                                                                       |
 | `SAKUDA_ZAP_CMD`               | `zap.sh` (`/zap/zap.sh` in the image)                     | ZAP entrypoint. Dev on macOS: `./scripts/zap-docker.sh`.                                                                         |
 | `SAKUDA_ZAP_WORKDIR`           | _(unset)_                                                 | Container-side path when ZAP sees the scan work dir at a different path than the host (the dev wrapper mounts it at `/zap/wrk`). |
 | `SAKUDA_ZAP_MAX_HEAP`          | `1024m`                                                   | `-Xmx` passed to ZAP via `JAVA_TOOL_OPTIONS`.                                                                                    |
@@ -108,7 +113,7 @@ pnpm install
 make env                    # .env with a fresh key (or: cp .env.example .env && pnpm keygen)
 ```
 
-nuclei and katana run as native binaries and ZAP runs via Docker in dev:
+nuclei, katana and dalfox run as native binaries and ZAP runs via Docker in dev:
 
 - Install nuclei locally (e.g. `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest`)
   and clone [nuclei-templates](https://github.com/projectdiscovery/nuclei-templates),
@@ -116,6 +121,10 @@ nuclei and katana run as native binaries and ZAP runs via Docker in dev:
 - Install katana locally (`go install github.com/projectdiscovery/katana/cmd/katana@v1.7.0`,
   the version pinned in the Dockerfile) and point `SAKUDA_KATANA_BIN` at it. Without
   it, discovery still works on ZAP alone and reports the missing binary as a warning.
+- Install dalfox locally (`brew install dalfox`, or download the pinned
+  v3.2.2 release) and point `SAKUDA_DALFOX_BIN` at it. Without it, a scan that
+  selects the XSS engine fails that engine run with a clear "binary not found"
+  error; the other engines are unaffected.
 - ZAP runs inside Docker via `scripts/zap-docker.sh` (no local ZAP install
   needed). Set in `.env`:
   ```
@@ -163,8 +172,8 @@ when the site itself is deleted.
 
 ## Scanning — engines and active checks
 
-A scan runs one or more engines against a site; when all three are selected
-they run in this fixed order, each with its own time budget:
+A scan runs one or more engines against a site; when all of them are
+selected they run in this fixed order, each with its own time budget:
 
 1. **ZAP API (active)** — drives ZAP's active scan from the site's OpenAPI
    spec (`openapiUrl` / `openapiJson`, plus a spec sakuda generates from saved
@@ -175,7 +184,15 @@ they run in this fixed order, each with its own time budget:
    page, a passive baseline scan, and a DOM-XSS probe over hash routes. The
    heaviest engine (it drives a real Firefox); size Docker's RAM as noted
    above.
-3. **Nuclei** — template scanning against the saved target paths (see
+3. **Dalfox (XSS)** — a bounded reflected + DOM(AST) cross-site-scripting
+   pass over the saved GET targets. It runs **only when active injection
+   checks are on**; otherwise its engine run is recorded as _skipped_ (not
+   failed), and it is off by default in the engine picker. Mining, deep scan,
+   stored/blind XSS, remote payload sources and external-JS fetching are all
+   disabled — it consumes the curated target list, not a recon dump, and only
+   a _verified_ finding is reported `high` (a reflection-only signal never is).
+   It does not replace the ZAP frontend DOM-XSS probe over hash routes.
+4. **Nuclei** — template scanning against the saved target paths (see
    [Discovery](#discovery--filling-the-target-list)).
 
 **sakuda sends attack traffic — only scan targets you own or are authorized
@@ -185,8 +202,8 @@ run by design, independent of the toggle below.
 **Active injection checks (per site).** This toggle broadens what the engines
 are allowed to attack: mutating-method requests to saved targets, nuclei's
 DAST fuzzing templates (GET and generated non-GET), ZAP's frontend active
-scan, and form-submitting discovery (katana `-aff`, ZAP `postForm`). With it
-off, those are held back. For a target that is not on your own machine, sakuda
+scan, the Dalfox XSS engine, and form-submitting discovery (katana `-aff`,
+ZAP `postForm`). With it off, those are held back. For a target that is not on your own machine, sakuda
 additionally requires you to confirm you are authorized (`nonLocalConfirmed`)
 before active checks take effect. Individual high-risk nuclei template groups
 (known-CVE exploits, command-injection / RCE, denial-of-service) are each

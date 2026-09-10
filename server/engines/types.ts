@@ -35,6 +35,11 @@ export interface EngineOutput {
   warnings: string[]
   exitCode: number | null
   signal: string | null
+  /** True when the runner decided, before doing any work, that it must not
+   * run (e.g. dalfox when active checks are off). The scan runner records the
+   * engine run as `skipped` rather than `done`, so a deliberate no-op is not
+   * mistaken for a clean run that found nothing. */
+  skipped?: boolean
 }
 
 export type EngineRunner = (input: EngineInput) => Promise<EngineOutput>

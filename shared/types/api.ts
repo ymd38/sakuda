@@ -1,6 +1,6 @@
 import type { BrowserStorageName } from '../schemas/browserStorage'
 
-export type Engine = 'nuclei' | 'zap-api' | 'zap-fe'
+export type Engine = 'nuclei' | 'zap-api' | 'zap-fe' | 'dalfox'
 export const RISK_TAGS = ['dos', 'fuzz', 'intrusive'] as const
 export type RiskTag = (typeof RISK_TAGS)[number]
 export type Severity = 'critical' | 'high' | 'medium'
@@ -13,7 +13,7 @@ export interface SeverityCounts {
   info: number
 }
 export type ScanStatus = 'queued' | 'running' | 'done' | 'failed'
-export type EngineRunStatus = 'running' | 'done' | 'failed'
+export type EngineRunStatus = 'running' | 'done' | 'failed' | 'skipped'
 export interface SitePublic {
   id: string
   name: string

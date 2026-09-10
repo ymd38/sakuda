@@ -56,6 +56,7 @@ function makeDeps(runners: Partial<Record<Engine, EngineRunner>>): ScanRunnerDep
     nuclei: vi.fn(async () => successOutput()),
     'zap-api': vi.fn(async () => successOutput()),
     'zap-fe': vi.fn(async () => successOutput()),
+    dalfox: vi.fn(async () => successOutput()),
     ...runners,
   }
   return { db, env, cipher: siteDeps.cipher, runners: full, logger, now, id }
@@ -115,6 +116,60 @@ describe('runScan', () => {
     expect(scanRow?.status).toBe('done')
     expect(scanRow?.error).toBeNull()
     expect(scanRow?.finishedAt).not.toBeNull()
+  })
+
+  it('records a skipped engine run (not done/failed) and keeps the scan done', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['dalfox', 'nuclei'])
+    const deps = makeDeps({
+      dalfox: vi.fn(async () =>
+        successOutput({ skipped: true, warnings: ['skipped: active checks off'], exitCode: null }),
+      ),
+    })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const runs = db.select().from(engineRuns).where(eq(engineRuns.scanId, scan.id)).all()
+    const dalfoxRun = runs.find((r) => r.engine === 'dalfox')
+    const nucleiRun = runs.find((r) => r.engine === 'nuclei')
+    expect(dalfoxRun?.status).toBe('skipped')
+    expect(nucleiRun?.status).toBe('done')
+
+    // A skipped run is neither success nor failure: the scan is done, not failed.
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('done')
+    expect(scanRow?.error).toBeNull()
+  })
+
+  it('reports failed + skipped counts when no engine succeeded but some were skipped', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['nuclei', 'dalfox'])
+    const deps = makeDeps({
+      nuclei: vi.fn(async () => {
+        throw new EngineError('boom')
+      }),
+      dalfox: vi.fn(async () => successOutput({ skipped: true })),
+    })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('failed')
+    expect(scanRow?.error).toBe('1 engine run(s) failed, 1 skipped')
+  })
+
+  it('marks a scan done (not failed) when its only engine run was skipped', async () => {
+    const site = createSite(siteDeps, base)
+    const scan = createScan(db, { now, id }, site.id, ['dalfox'])
+    const deps = makeDeps({
+      dalfox: vi.fn(async () => successOutput({ skipped: true })),
+    })
+
+    await runScan(deps, scan.id, new AbortController().signal)
+
+    const scanRow = db.select().from(scans).where(eq(scans.id, scan.id)).get()
+    expect(scanRow?.status).toBe('done')
+    expect(scanRow?.error).toMatch(/skipped/i)
   })
 
   it('keeps running other engines when one fails, and records the runbook', async () => {

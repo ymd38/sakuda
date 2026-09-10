@@ -31,6 +31,8 @@ function engineSpecificRows(engine: Engine, meta: Record<string, unknown>): stri
       return zapRows(meta, true)
     case 'zap-api':
       return zapRows(meta, false)
+    case 'dalfox':
+      return dalfoxRows(meta)
     default: {
       const exhaustive: never = engine
       return exhaustive
@@ -68,6 +70,30 @@ function nucleiRows(meta: Record<string, unknown>): string[] {
     if (errors) rows.push(`| Errors | ${text(errors)} |`)
     const rps = metaString(stats, 'rps')
     if (rps) rows.push(`| Avg RPS | ${text(rps)} |`)
+  }
+  return rows
+}
+
+function dalfoxRows(meta: Record<string, unknown>): string[] {
+  const rows: string[] = []
+  if (meta.skipped === true) {
+    rows.push('| Skipped | Active injection checks are off |')
+    return rows
+  }
+  const urlCount = metaNumber(meta, 'urlCount')
+  if (urlCount !== undefined) rows.push(`| Target URLs | ${urlCount} |`)
+  const rateLimit = metaNumber(meta, 'rateLimit')
+  if (rateLimit !== undefined) rows.push(`| Rate limit | ${rateLimit} req/s |`)
+  const concurrency = metaNumber(meta, 'concurrency')
+  if (concurrency !== undefined) rows.push(`| Concurrency | ${concurrency} |`)
+  const maxTargets = metaNumber(meta, 'maxTargets')
+  if (maxTargets !== undefined) rows.push(`| Max targets | ${maxTargets} |`)
+  const totalRequests = metaNumber(meta, 'totalRequests')
+  if (totalRequests !== undefined) rows.push(`| Requests sent | ${totalRequests} |`)
+  if (metaBoolean(meta, 'incomplete')) rows.push('| Incomplete scan | Yes |')
+  if (metaBoolean(meta, 'unavailable')) {
+    const n = metaNumber(meta, 'unreachableTargets')
+    rows.push(`| Target unavailable | Yes${n !== undefined ? ` (${n} unreachable)` : ''} |`)
   }
   return rows
 }

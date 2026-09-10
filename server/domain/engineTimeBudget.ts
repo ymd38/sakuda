@@ -9,6 +9,7 @@ export const DOM_XSS_PROBE_BUDGET_MINUTES = 10
 export type TimeBudgetSite = Pick<SitePublic, 'zapApiMaxMinutes' | 'zapFeSpiderMaxMinutes'>
 export interface TimeBudgetEnv {
   nucleiMaxMinutes: number
+  dalfoxMaxMinutes: number
   engineGraceMinutes: number
 }
 export interface TimeBudgetFlags {
@@ -19,8 +20,14 @@ export interface TimeBudgetFlags {
 }
 
 /** The env fields the budget depends on, picked from the validated env. */
-export function timeBudgetEnv(env: Pick<Env, 'nuclei' | 'engineGraceMinutes'>): TimeBudgetEnv {
-  return { nucleiMaxMinutes: env.nuclei.maxMinutes, engineGraceMinutes: env.engineGraceMinutes }
+export function timeBudgetEnv(
+  env: Pick<Env, 'nuclei' | 'dalfox' | 'engineGraceMinutes'>,
+): TimeBudgetEnv {
+  return {
+    nucleiMaxMinutes: env.nuclei.maxMinutes,
+    dalfoxMaxMinutes: env.dalfox.maxMinutes,
+    engineGraceMinutes: env.engineGraceMinutes,
+  }
 }
 
 /**
@@ -62,6 +69,14 @@ export function engineTimeBudget(
         parts.push({ label: 'DOM XSS probe', minutes: DOM_XSS_PROBE_BUDGET_MINUTES })
       parts.push(
         { label: 'passive scan', minutes: ZAP_PASSIVE_MAX_MINUTES },
+        { label: 'shutdown grace', minutes: env.engineGraceMinutes },
+      )
+      break
+    case 'dalfox':
+      // One self-limited run: dalfox enforces its own per-target scan timeout
+      // derived from this budget, plus the shutdown grace the process gets.
+      parts.push(
+        { label: 'dalfox (SAKUDA_DALFOX_MAX_MINUTES)', minutes: env.dalfoxMaxMinutes },
         { label: 'shutdown grace', minutes: env.engineGraceMinutes },
       )
       break

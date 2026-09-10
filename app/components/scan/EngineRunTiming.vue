@@ -33,6 +33,8 @@ function statusTextClass(s: TimingStatus): string {
       return 'text-info'
     case 'pending':
       return 'text-mute'
+    case 'skipped':
+      return 'text-mute'
     default: {
       const exhaustive: never = s
       return exhaustive

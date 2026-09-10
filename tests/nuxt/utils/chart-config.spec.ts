@@ -14,7 +14,12 @@ const palette: ChartPalette = {
   grid: 'grid-color',
   text: 'text-color',
   severity: { critical: 'c-color', high: 'h-color', medium: 'm-color' },
-  engines: { nuclei: 'nuclei-color', 'zap-api': 'zap-api-color', 'zap-fe': 'zap-fe-color' },
+  engines: {
+    nuclei: 'nuclei-color',
+    'zap-api': 'zap-api-color',
+    'zap-fe': 'zap-fe-color',
+    dalfox: 'dalfox-color',
+  },
   diff: { new: 'new-color', persisting: 'persisting-color', resolved: 'resolved-color' },
 }
 
@@ -89,19 +94,21 @@ describe('buildEngineCountConfig', () => {
       'Nuclei',
       'ZAP API (active)',
       'ZAP Frontend (baseline)',
+      'Dalfox (XSS)',
     ])
-    expect(config.data.datasets.map((d) => d.data[0])).toEqual([1, 3, 0])
+    expect(config.data.datasets.map((d) => d.data[0])).toEqual([1, 3, 0, 0])
     expect(config.data.datasets.map((d) => d.backgroundColor)).toEqual([
       'nuclei-color',
       'zap-api-color',
       'zap-fe-color',
+      'dalfox-color',
     ])
   })
 
   it('uses 0 for an engine absent from a point', () => {
     const point = historyPointFixture({ engines: {} })
     const config = buildEngineCountConfig([point], palette)
-    expect(config.data.datasets.map((d) => d.data[0])).toEqual([0, 0, 0])
+    expect(config.data.datasets.map((d) => d.data[0])).toEqual([0, 0, 0, 0])
   })
 })
 

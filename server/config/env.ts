@@ -53,6 +53,12 @@ const EnvSchema = z.object({
   SAKUDA_NUCLEI_MAX_MINUTES: z.coerce.number().int().positive().default(60),
   SAKUDA_NUCLEI_CONCURRENCY: z.coerce.number().int().positive().default(25),
   SAKUDA_KATANA_BIN: z.string().default('katana'),
+  SAKUDA_DALFOX_BIN: z.string().default('dalfox'),
+  SAKUDA_DALFOX_MAX_MINUTES: z.coerce.number().int().positive().default(10),
+  // Bounded parallelism for the XSS pass — deliberately small: dalfox is
+  // aimed at a curated saved-target list, not a large recon dump.
+  SAKUDA_DALFOX_CONCURRENCY: z.coerce.number().int().positive().default(10),
+  SAKUDA_DALFOX_MAX_TARGETS: z.coerce.number().int().positive().default(50),
   SAKUDA_ZAP_CMD: z.string().default('zap.sh'),
   SAKUDA_ZAP_WORKDIR: optionalString,
   SAKUDA_ZAP_MAX_HEAP: z
@@ -84,6 +90,12 @@ export interface Env {
   }
   /** katana's time budget is the site's `zapFeSpiderMaxMinutes` — no env knob. */
   katana: { bin: string }
+  dalfox: {
+    bin: string
+    maxMinutes: number
+    concurrency: number
+    maxTargets: number
+  }
   zap: {
     cmd: string
     workDir: string | undefined
@@ -120,6 +132,12 @@ export function parseEnv(raw: NodeJS.ProcessEnv): Env {
       concurrency: v.SAKUDA_NUCLEI_CONCURRENCY,
     },
     katana: { bin: resolveExecutablePath(v.SAKUDA_KATANA_BIN) },
+    dalfox: {
+      bin: resolveExecutablePath(v.SAKUDA_DALFOX_BIN),
+      maxMinutes: v.SAKUDA_DALFOX_MAX_MINUTES,
+      concurrency: v.SAKUDA_DALFOX_CONCURRENCY,
+      maxTargets: v.SAKUDA_DALFOX_MAX_TARGETS,
+    },
     zap: {
       cmd: resolveExecutablePath(v.SAKUDA_ZAP_CMD),
       workDir: v.SAKUDA_ZAP_WORKDIR,

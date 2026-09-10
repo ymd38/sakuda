@@ -73,8 +73,8 @@ export const engineRuns = sqliteTable(
     scanId: text('scan_id')
       .notNull()
       .references(() => scans.id, { onDelete: 'cascade' }),
-    engine: text('engine', { enum: ['nuclei', 'zap-api', 'zap-fe'] }).notNull(),
-    status: text('status', { enum: ['running', 'done', 'failed'] }).notNull(),
+    engine: text('engine', { enum: ['nuclei', 'zap-api', 'zap-fe', 'dalfox'] }).notNull(),
+    status: text('status', { enum: ['running', 'done', 'failed', 'skipped'] }).notNull(),
     startedAt: text('started_at').notNull(),
     finishedAt: text('finished_at'),
     exitCode: integer('exit_code'),
@@ -96,7 +96,7 @@ export const findings = sqliteTable(
     engineRunId: text('engine_run_id')
       .notNull()
       .references(() => engineRuns.id, { onDelete: 'cascade' }),
-    engine: text('engine', { enum: ['nuclei', 'zap-api', 'zap-fe'] }).notNull(),
+    engine: text('engine', { enum: ['nuclei', 'zap-api', 'zap-fe', 'dalfox'] }).notNull(),
     ruleId: text('rule_id').notNull(),
     name: text('name').notNull(),
     severity: text('severity', { enum: ['critical', 'high', 'medium'] }).notNull(),

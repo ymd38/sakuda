@@ -6,6 +6,7 @@ import DiffTrendChart from '~/components/chart/DiffTrendChart.vue'
 import DiscoveryPanel from '~/components/site/DiscoveryPanel.vue'
 import type { Engine, HistoryPoint, ScanSummary, SitePublic } from '#shared/types/api'
 import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
+import { isActiveScanEnabled } from '#shared/utils/activeScan'
 
 const route = useRoute()
 // `route.params.id` is `string | string[]` generically; this route only has
@@ -20,6 +21,7 @@ const { data: history } = await useFetch<HistoryPoint[]>(`/api/sites/${siteId}/h
 const nucleiChecked = ref(true)
 const zapApiChecked = ref(false)
 const zapFeChecked = ref(true)
+const dalfoxChecked = ref(false)
 
 const submitting = ref(false)
 const errorMessage = ref<string | null>(null)
@@ -36,12 +38,16 @@ const nucleiScansRootOnly = computed(() => !!site.value && savedTargetCount.valu
 function handleTargetsSaved(updated: SitePublic) {
   site.value = updated
 }
+// dalfox sends attack payloads, so it can run only under active injection checks.
+const dalfoxAvailable = computed(() => !!site.value && isActiveScanEnabled(site.value))
 const zapApiAvailable = computed(
   () => !!site.value && (!!site.value.openapiUrl || !!site.value.openapiJson),
 )
 
 const canStartScan = computed(
-  () => !submitting.value && (nucleiChecked.value || zapApiChecked.value || zapFeChecked.value),
+  () =>
+    !submitting.value &&
+    (nucleiChecked.value || zapApiChecked.value || zapFeChecked.value || dalfoxChecked.value),
 )
 
 function selectedEngines(): Engine[] {
@@ -49,6 +55,7 @@ function selectedEngines(): Engine[] {
   if (nucleiChecked.value) engines.push('nuclei')
   if (zapApiChecked.value) engines.push('zap-api')
   if (zapFeChecked.value) engines.push('zap-fe')
+  if (dalfoxChecked.value) engines.push('dalfox')
   return engines
 }
 
@@ -147,6 +154,21 @@ async function handleStartScan() {
             <input v-model="zapFeChecked" data-testid="engine-zap-fe" type="checkbox" />
             {{ ENGINE_LABELS['zap-fe'] }}
           </label>
+
+          <div>
+            <label class="text-body-md text-ink flex items-center gap-2">
+              <input
+                v-model="dalfoxChecked"
+                data-testid="engine-dalfox"
+                type="checkbox"
+                :disabled="!dalfoxAvailable"
+              />
+              {{ ENGINE_LABELS.dalfox }}
+            </label>
+            <p v-if="!dalfoxAvailable" class="text-caption-sm text-mute mt-1">
+              Turn on "Active injection checks" in Edit to enable this XSS engine.
+            </p>
+          </div>
         </div>
 
         <p v-if="errorMessage" data-testid="scan-error" class="text-sale text-body-md">

@@ -8,6 +8,7 @@ const FALLBACKS = {
   info: '#1151ff',
   ink: '#111111',
   accentTeal: '#0a7281',
+  accentPink: '#ed1aa0',
   stone: '#9e9ea0',
   success: '#007d48',
   hairlineSoft: '#e5e5e5',
@@ -27,13 +28,14 @@ export function resolveChartPalette(): ChartPalette {
   const ink = token('--color-ink', FALLBACKS.ink)
   const accentTeal = token('--color-accent-teal', FALLBACKS.accentTeal)
   const stone = token('--color-stone', FALLBACKS.stone)
+  const accentPink = token('--color-accent-pink', FALLBACKS.accentPink)
   const success = token('--color-success', FALLBACKS.success)
 
   return {
     grid: token('--color-hairline-soft', FALLBACKS.hairlineSoft),
     text: token('--color-mute', FALLBACKS.mute),
     severity: { critical: saleDeep, high: sale, medium: info },
-    engines: { nuclei: ink, 'zap-api': accentTeal, 'zap-fe': stone },
+    engines: { nuclei: ink, 'zap-api': accentTeal, 'zap-fe': stone, dalfox: accentPink },
     diff: { new: sale, persisting: stone, resolved: success },
   }
 }

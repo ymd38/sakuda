@@ -48,6 +48,17 @@ describe('EngineRunTiming (#84)', () => {
     expect(wrapper.find('[data-testid="engine-elapsed"]').text()).toBe('Elapsed 2m 32s')
   })
 
+  it('skipped: muted pill reading "skipped"', async () => {
+    const wrapper = await mount({
+      status: 'skipped',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-01T00:00:00.000Z',
+    })
+    const pill = wrapper.find('[data-testid="engine-status-pill"]')
+    expect(pill.text()).toBe('skipped')
+    expect(pill.classes()).toContain('text-mute')
+  })
+
   it('done: total duration, the limit, and no stopped-at-limit mark', async () => {
     const wrapper = await mount({
       status: 'done',

@@ -1,0 +1,179 @@
+import { z } from 'zod'
+import { emptyCounts, isReportedSeverity } from '#shared/utils/severity'
+import type { SeverityCounts, Severity, SeverityLevel } from '#shared/types/api'
+import type { NewFinding } from '../types'
+
+/**
+ * The subset of a dalfox JSON finding sakuda reads (dalfox v3.2.2 `-f json`,
+ * one object per element of the top-level `findings` array). `data` carries
+ * the full URL the payload landed in — dalfox has no separate `url` key — and
+ * `param` is the parameter name (`-` for an AST/DOM flow with no request
+ * parameter). Unknown keys are ignored so a newer dalfox that adds fields
+ * still parses.
+ */
+const DalfoxFindingSchema = z
+  .object({
+    type: z.string().default(''),
+    inject_type: z.string().default(''),
+    method: z.string().default(''),
+    data: z.string().default(''),
+    param: z.string().default(''),
+    payload: z.string().default(''),
+    evidence: z.string().default(''),
+    cwe: z.string().default(''),
+    severity: z.string().default(''),
+    message_str: z.string().default(''),
+    detection_method: z.string().optional(),
+    confidence: z.string().optional(),
+    confidence_reason: z.string().optional(),
+  })
+  .passthrough()
+
+export type DalfoxFinding = z.infer<typeof DalfoxFindingSchema>
+
+const DalfoxReportSchema = z
+  .object({
+    findings: z.array(z.unknown()).optional(),
+    results: z.array(z.unknown()).optional(),
+    meta: z.record(z.string(), z.unknown()).optional(),
+  })
+  .passthrough()
+
+export interface ParsedDalfoxReport {
+  findings: DalfoxFinding[]
+  meta: Record<string, unknown>
+  /** Findings that were present but unparsable, so a partial report is not
+   * silently read as fewer findings. */
+  invalid: number
+}
+
+/** A dalfox target_summary entry we care about for reachability. */
+interface DalfoxTargetSummary {
+  status?: string
+  error_code?: string
+}
+
+export interface DalfoxReachability {
+  total: number
+  unreachable: number
+  /** True when every listed target failed to connect (or was skipped) — the
+   * whole target set was down, not a real scan error. Distinguishes
+   * "unavailable" from a genuine dalfox failure and from a clean zero. */
+  allUnreachable: boolean
+}
+
+/**
+ * Reads reachability from the scan-metadata envelope's `target_summary`. A
+ * target is "unreachable" only when dalfox attached a non-empty `error_code`
+ * (e.g. CONNECTION_FAILED) — a connection/transport failure it never got past.
+ * A bare `status: "skipped"` with no error code is NOT counted: a target
+ * skipped for some other reason must not let a genuine exit-2 error be
+ * downgraded to a warning.
+ */
+export function dalfoxReachability(meta: Record<string, unknown>): DalfoxReachability {
+  const raw = meta.target_summary
+  const list: DalfoxTargetSummary[] = Array.isArray(raw) ? (raw as DalfoxTargetSummary[]) : []
+  const unreachable = list.filter(
+    (t) => t != null && typeof t.error_code === 'string' && t.error_code.trim() !== '',
+  ).length
+  return {
+    total: list.length,
+    unreachable,
+    allUnreachable: list.length > 0 && unreachable === list.length,
+  }
+}
+
+/** Parses dalfox's JSON document into typed findings + the scan-metadata
+ * envelope. A malformed document yields an empty report with `invalid`
+ * reflecting the count when it is an array of broken entries. */
+export function parseDalfoxReport(json: string): ParsedDalfoxReport {
+  let doc: unknown
+  try {
+    doc = JSON.parse(json)
+  } catch {
+    return { findings: [], meta: {}, invalid: 0 }
+  }
+  const outer = DalfoxReportSchema.safeParse(doc)
+  if (!outer.success) return { findings: [], meta: {}, invalid: 0 }
+  const rawList = outer.data.findings ?? outer.data.results ?? []
+  const findings: DalfoxFinding[] = []
+  let invalid = 0
+  for (const item of rawList) {
+    const parsed = DalfoxFindingSchema.safeParse(item)
+    if (parsed.success) findings.push(parsed.data)
+    else invalid++
+  }
+  return { findings, meta: outer.data.meta ?? {}, invalid }
+}
+
+/** dalfox confidence tiers we treat as XSS findings; `I` (informational /
+ * outdated-library) is not an XSS claim and is dropped. */
+const XSS_TIERS = new Set(['V', 'A', 'R'])
+
+/**
+ * Maps a dalfox tier to a sakuda severity. Deliberately conservative:
+ * only a *verified* finding (`V`) reaches `high`; an AST/DOM flow (`A`) and a
+ * reflection-only signal (`R`) are `medium`. A reflection is never promoted to
+ * critical/high — dalfox drives no browser, so `R` is a signal, not a claim.
+ */
+export function dalfoxSeverity(tier: string): Severity {
+  return tier === 'V' ? 'high' : 'medium'
+}
+
+/** The detection method, falling back from the tier when dalfox omits it, so
+ * the fingerprint ruleId is stable and never payload-derived. */
+function methodOf(f: DalfoxFinding): string {
+  if (f.detection_method && f.detection_method.trim() !== '') return f.detection_method
+  return f.type === 'A' ? 'ast' : f.type === 'R' ? 'reflection' : 'dom-verification'
+}
+
+const TIER_NAME: Record<string, string> = {
+  V: 'Cross-Site Scripting (verified)',
+  A: 'DOM-based XSS (AST source-to-sink)',
+  R: 'Reflected input (unverified XSS signal)',
+}
+
+const XSS_SOLUTION =
+  'Treat the parameter/URL as untrusted: render it as text or encode it for its output context, and rely on the framework escaping rather than assigning to innerHTML / document.write.'
+
+/** Normalizes dalfox's parsed findings to `NewFinding[]` + counts. `unalias`
+ * restores a rewritten loopback host in the reported URL. Findings that are
+ * not XSS tiers, or that map to a non-reported severity, are dropped. */
+export function normalizeDalfoxFindings(
+  findings: DalfoxFinding[],
+  unalias: (u: string) => string,
+): { findings: NewFinding[]; counts: SeverityCounts } {
+  const out: NewFinding[] = []
+  const counts = emptyCounts()
+  for (const f of findings) {
+    if (!XSS_TIERS.has(f.type)) continue
+    const level: SeverityLevel = dalfoxSeverity(f.type)
+    if (!isReportedSeverity(level)) continue
+    const method = methodOf(f)
+    const param = f.param === '' || f.param === '-' ? null : f.param
+    const cwe = f.cwe || 'CWE-79'
+    const cweId = /(\d+)/.exec(cwe)?.[1] ?? '79'
+    const descriptionParts = [
+      f.message_str || TIER_NAME[f.type] || 'Cross-Site Scripting',
+      f.inject_type ? `Context: ${f.inject_type}.` : '',
+      f.confidence ? `Confidence: ${f.confidence}.` : '',
+      f.confidence_reason ? f.confidence_reason : '',
+    ].filter((p) => p !== '')
+    out.push({
+      engine: 'dalfox',
+      ruleId: `dalfox:${method}`,
+      name: f.message_str || TIER_NAME[f.type] || 'Cross-Site Scripting',
+      severity: level,
+      url: unalias(f.data),
+      method: f.method || null,
+      param,
+      evidence: f.evidence || null,
+      description: descriptionParts.join(' '),
+      solution: XSS_SOLUTION,
+      reference: `https://cwe.mitre.org/data/definitions/${cweId}.html`,
+      raw: { ...f, data: unalias(f.data) },
+    })
+    counts[level]++
+  }
+  return { findings: out, counts }
+}

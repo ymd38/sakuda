@@ -71,6 +71,7 @@ export async function runScan(
     const log = logger.child({ scanId, siteId: site.id })
     let doneCount = 0
     let failedCount = 0
+    let skippedCount = 0
     for (const engine of orderEngines(scan.engines)) {
       if (signal.aborted) {
         failedCount++
@@ -101,10 +102,14 @@ export async function runScan(
           logger: log,
           signal,
         })
+        // A runner that skipped itself (e.g. dalfox with active checks off)
+        // records a `skipped` run — neither a success nor a failure — so the
+        // overall scan status is decided only by the engines that actually ran.
+        const runStatus = out.skipped ? 'skipped' : 'done'
         db.transaction((tx) => {
           tx.update(engineRuns)
             .set({
-              status: 'done',
+              status: runStatus,
               finishedAt: deps.now().toISOString(),
               exitCode: out.exitCode,
               signal: out.signal,
@@ -127,8 +132,17 @@ export async function runScan(
               )
               .run()
         })
-        doneCount++
-        log.info({ engine, counts: out.counts, findings: out.findings.length }, 'engine done')
+        if (out.skipped) skippedCount++
+        else doneCount++
+        log.info(
+          {
+            engine,
+            counts: out.counts,
+            findings: out.findings.length,
+            skipped: out.skipped === true,
+          },
+          out.skipped ? 'engine skipped' : 'engine done',
+        )
       } catch (e) {
         const message =
           e instanceof EngineError && e.runbook
@@ -145,6 +159,13 @@ export async function runScan(
       }
     }
     if (signal.aborted) finish('failed', 'aborted: server shutting down')
+    // Every engine failed → the scan failed. But a scan whose only runs were
+    // skipped (e.g. dalfox alone, active checks off) did not fail — it ran
+    // nothing, and says so.
+    else if (doneCount === 0 && failedCount === 0 && skippedCount > 0)
+      finish('done', `all ${skippedCount} engine run(s) were skipped`)
+    else if (doneCount === 0 && failedCount > 0 && skippedCount > 0)
+      finish('failed', `${failedCount} engine run(s) failed, ${skippedCount} skipped`)
     else if (doneCount === 0) finish('failed', `all ${failedCount} engine run(s) failed`)
     else finish('done', failedCount ? `${failedCount} engine run(s) failed` : null)
   } catch (e) {

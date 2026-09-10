@@ -50,13 +50,14 @@ describe('engineTimeBudget (#84)', () => {
     expect(b.totalMinutes).toBe(10 + 45 + DOM_XSS_PROBE_BUDGET_MINUTES + 5 + 10)
   })
 
-  it('timeBudgetEnv picks the two env fields', () => {
+  it('timeBudgetEnv picks the env fields the budget depends on', () => {
     expect(
       timeBudgetEnv({
         nuclei: { bin: 'nuclei', templatesDir: '/t', dastTemplatesDir: '/d', maxMinutes: 30 },
+        dalfox: { bin: 'dalfox', maxMinutes: 12, concurrency: 10, maxTargets: 50 },
         engineGraceMinutes: 7,
       }),
-    ).toEqual({ nucleiMaxMinutes: 30, engineGraceMinutes: 7 })
+    ).toEqual({ nucleiMaxMinutes: 30, dalfoxMaxMinutes: 12, engineGraceMinutes: 7 })
   })
 })
 
