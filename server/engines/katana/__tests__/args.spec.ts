@@ -7,7 +7,7 @@ describe('buildKatanaArgs', () => {
       seedsFile: '/w/seeds.txt',
       outputFile: '/w/urls.jsonl',
       maxMinutes: 5,
-      headers: [],
+      headersConfigFile: null,
     })
     expect(args).toEqual([
       '-list',
@@ -67,16 +67,14 @@ describe('buildKatanaArgs', () => {
     expect(buildKatanaArgs({ ...base, activeFormFill: false })).toEqual(buildKatanaArgs(base))
   })
 
-  it('appends one -H pair per header', () => {
+  it('passes the headers config file with -config, never a -H value (#95)', () => {
     const args = buildKatanaArgs({
       seedsFile: 's',
       outputFile: 'o',
       maxMinutes: 1,
-      headers: [
-        { name: 'Cookie', value: 'a=b' },
-        { name: 'Authorization', value: 'Bearer x' },
-      ],
+      headersConfigFile: '/w/katana/headers.json',
     })
-    expect(args.slice(-4)).toEqual(['-H', 'Cookie: a=b', '-H', 'Authorization: Bearer x'])
+    expect(args.slice(-2)).toEqual(['-config', '/w/katana/headers.json'])
+    expect(args).not.toContain('-H')
   })
 })

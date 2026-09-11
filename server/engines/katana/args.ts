@@ -1,5 +1,4 @@
-import { headersToHeaderArgs } from '../../domain/headerCipher'
-import type { Header } from '#shared/schemas/headers'
+import { headersConfigArgs } from '../headersConfig'
 
 export interface KatanaArgsInput {
   /** One seed URL per line (`-list`, like nuclei's `-l`): a URL is never
@@ -9,7 +8,9 @@ export interface KatanaArgsInput {
   /** `-ct <n>m`: katana stops crawling after this budget on its own; the
    * `runCommand` timeout above it is the hard stop. */
   maxMinutes: number
-  headers: Header[]
+  /** Path of the 0600 headers config (`engines/headersConfig`), or null
+   * when the site has no headers — the values never go on argv (#95). */
+  headersConfigFile: string | null
   /** `-cs` regexes (see `domain/crawlScope` `katanaScopeRegexes`); empty
    * when the site sets no crawl scope, so the argv is unchanged. */
   crawlScopeRegexes?: string[]
@@ -58,6 +59,6 @@ export function buildKatanaArgs(i: KatanaArgsInput): string[] {
     // 15 vs 209 lines).
     '-eof',
     'raw,body,headers',
-    ...headersToHeaderArgs(i.headers),
+    ...headersConfigArgs(i.headersConfigFile),
   ]
 }

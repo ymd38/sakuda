@@ -1,11 +1,10 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Header } from '#shared/schemas/headers'
 import type { Logger } from '../../../lib/logger'
 import { runCommand, SpawnError } from '../../runCommand'
 import { EngineError } from '../../types'
-import { buildHttpxArgs, redactHttpxArgs } from './args'
+import { buildHttpxArgs } from './args'
 import { annotateTargets, parseHttpxJsonl } from './normalize'
 
 /** Sub-directory of nuclei's work dir: `data/scans/<scanId>/nuclei/httpx/`. */
@@ -22,7 +21,8 @@ export interface HttpxProbeInput {
   timeoutMs: number
   threads: number
   rateLimit: number
-  headers: Header[]
+  /** The nuclei run's 0600 headers config (shared with its phases), or null. */
+  headersConfigFile: string | null
   /** Statuses that drop a target — empty by default (annotate only). */
   pruneStatusCodes: number[]
   signal: AbortSignal
@@ -78,16 +78,17 @@ export async function probeTargets(i: HttpxProbeInput): Promise<HttpxProbeResult
   // Secret-artifact discipline (as for nuclei's OpenAPI docs): the target
   // lines carry query values and httpx's output echoes them, so everything
   // under httpx/ is 0600, pre-created so the tool never creates it under the
-  // process umask. argv is persisted with header values masked.
+  // process umask. argv carries the headers only as a `-config` path (#95),
+  // so it is persisted as-is.
   await writeFile(targetsFile, i.targetUrls.join('\n') + '\n', { mode: 0o600 })
   for (const p of [stdoutPath, stderrPath]) await writeFile(p, '', { mode: 0o600 })
   const args = buildHttpxArgs({
     targetsFile,
     threads: i.threads,
     rateLimit: i.rateLimit,
-    headers: i.headers,
+    headersConfigFile: i.headersConfigFile,
   })
-  await writeFile(argsFile, JSON.stringify(redactHttpxArgs(args)), { mode: 0o600 })
+  await writeFile(argsFile, JSON.stringify(args), { mode: 0o600 })
 
   const passThrough = (
     status: Exclude<HttpxProbeStatus, 'ok'>,

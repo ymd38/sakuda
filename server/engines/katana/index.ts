@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { isActiveScanEnabled } from '../../domain/activeScan'
 import { crawledUrlKey, normalizeCrawledEntries } from '../../domain/crawledUrls'
 import { joinUrl, restoreLoopbackHost, rewriteLoopbackHost } from '../../domain/hostAlias'
+import { withHeadersConfig } from '../headersConfig'
 import { runCommand } from '../runCommand'
 import { EngineError, OOM_RUNBOOK, type DiscoverInput, type DiscoverOutput } from '../types'
 import { buildKatanaArgs, KATANA_MAX_DEPTH } from './args'
@@ -23,14 +24,21 @@ const OUTPUT_FILE = 'urls.jsonl'
  * run the two side by side and merge them; runs in the app's own container
  * (like nuclei), hence `env.localhostAlias`, not ZAP's.
  */
-export async function runKatanaCrawl({
-  discoveryId,
-  site,
-  workDir: discoveryWorkDir,
-  env,
-  logger,
-  signal,
-}: DiscoverInput): Promise<DiscoverOutput> {
+export function runKatanaCrawl(input: DiscoverInput): Promise<DiscoverOutput> {
+  // The site's headers go to katana as a 0600 `-config` file that lives
+  // only for the crawl — never on argv (#95).
+  return withHeadersConfig(
+    join(input.workDir, KATANA_WORK_SUBDIR, 'headers.json'),
+    input.site.headers,
+    'headers',
+    (headersConfigFile) => crawl(input, headersConfigFile),
+  )
+}
+
+async function crawl(
+  { discoveryId, site, workDir: discoveryWorkDir, env, logger, signal }: DiscoverInput,
+  headersConfigFile: string | null,
+): Promise<DiscoverOutput> {
   const workDir = join(discoveryWorkDir, KATANA_WORK_SUBDIR)
   const originalHost = new URL(site.frontBaseUrl).hostname
   const seedPaths = resolveDiscoverySeeds(site)
@@ -48,7 +56,7 @@ export async function runKatanaCrawl({
     seedsFile,
     outputFile,
     maxMinutes,
-    headers: site.headers,
+    headersConfigFile,
     crawlScopeRegexes: katanaScopeRegexes({
       seedUrls,
       front: rewriteLoopbackHost(site.frontBaseUrl + '/', env.localhostAlias).replace(/\/$/, ''),

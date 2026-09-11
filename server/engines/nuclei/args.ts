@@ -1,5 +1,4 @@
-import { headersToHeaderArgs } from '../../domain/headerCipher'
-import type { Header } from '#shared/schemas/headers'
+import { headersConfigArgs } from '../headersConfig'
 
 export interface NucleiArgsInput {
   targetsFile: string
@@ -8,7 +7,9 @@ export interface NucleiArgsInput {
   rateLimit: number
   concurrency: number
   tags: string[]
-  headers: Header[]
+  /** Path of the 0600 headers config (`engines/headersConfig`), or null
+   * when the site has no headers — the values never go on argv (#95). */
+  headersConfigFile: string | null
   /** `-exclude-tags` value; defaults to all three risk tags. The caller
    * passes a shorter list only when a site opted a risk group back in
    * (see `domain/activeScan` `riskExcludeTags`). */
@@ -68,7 +69,7 @@ export function buildNucleiArgs(i: NucleiArgsInput): string[] {
     NUCLEI_NO_HOST_ERROR_SKIP,
     '-nc',
     '-omit-raw',
-    ...headersToHeaderArgs(i.headers),
+    ...headersConfigArgs(i.headersConfigFile),
   ]
 }
 
@@ -83,7 +84,9 @@ export interface NucleiDastArgsInput {
    * opt-in gates the DAST templates exactly as it did before the split. */
   tags: string[]
   excludeTags: string[]
-  headers: Header[]
+  /** Path of the 0600 headers config (`engines/headersConfig`), or null
+   * when the site has no headers — the values never go on argv (#95). */
+  headersConfigFile: string | null
 }
 
 /**
@@ -120,7 +123,7 @@ export function buildNucleiDastArgs(i: NucleiDastArgsInput): string[] {
     NUCLEI_NO_HOST_ERROR_SKIP,
     '-nc',
     '-omit-raw',
-    ...headersToHeaderArgs(i.headers),
+    ...headersConfigArgs(i.headersConfigFile),
   ]
 }
 
@@ -133,7 +136,9 @@ export interface NucleiOpenapiArgsInput {
   outputFile: string
   rateLimit: number
   concurrency: number
-  headers: Header[]
+  /** Path of the 0600 headers config (`engines/headersConfig`), or null
+   * when the site has no headers — the values never go on argv (#95). */
+  headersConfigFile: string | null
 }
 
 /**
@@ -168,6 +173,6 @@ export function buildNucleiOpenapiArgs(i: NucleiOpenapiArgsInput): string[] {
     NUCLEI_NO_HOST_ERROR_SKIP,
     '-nc',
     '-omit-raw',
-    ...headersToHeaderArgs(i.headers),
+    ...headersConfigArgs(i.headersConfigFile),
   ]
 }

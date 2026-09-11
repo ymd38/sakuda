@@ -128,8 +128,3 @@ export function createSiteCipher(keyBase64: string): SiteCipher {
     browserStorage: createBrowserStorageCipher(keyBase64),
   }
 }
-
-/** `-H "Name: value"` pairs as nuclei and katana both take them. */
-export function headersToHeaderArgs(headers: Header[]): string[] {
-  return headers.flatMap((h) => ['-H', `${h.name}: ${h.value}`])
-}

@@ -15,6 +15,7 @@ import { buildNonGetOpenApiDocs } from '../../domain/openapiGen'
 import { countSkippedMethods, expandNucleiTargets } from '../../domain/nucleiTargets'
 import type { SeverityCounts } from '#shared/types/api'
 import { emptyCounts } from '#shared/utils/severity'
+import { withHeadersConfig } from '../headersConfig'
 import { runCommand, type CommandResult } from '../runCommand'
 import {
   EngineError,
@@ -77,7 +78,21 @@ function addCounts(into: SeverityCounts, from: SeverityCounts): void {
   for (const k of Object.keys(into) as (keyof SeverityCounts)[]) into[k] += from[k]
 }
 
-export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logger, signal }) => {
+/** The nuclei engine run: the site's headers are written once, 0600, and
+ * shared by the httpx probe and every nuclei phase as `-config` — never on
+ * argv (#95) — and removed when the run ends, however it ends. */
+export const runNuclei: EngineRunner = (input) =>
+  withHeadersConfig(
+    join(input.workDir, 'headers.json'),
+    input.site.headers,
+    'header',
+    (headersConfigFile) => runNucleiPhases(input, headersConfigFile),
+  )
+
+async function runNucleiPhases(
+  { scanId, site, workDir, env, logger, signal }: EngineInput,
+  headersConfigFile: string | null,
+): ReturnType<EngineRunner> {
   const { targets, excluded } = expandNucleiTargets(site)
   // Hash routes (`/#/search?q=`) are SPA client routes: the fragment never
   // reaches the server, so requesting one just GETs `/`. nuclei is
@@ -221,7 +236,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       timeoutMs: Math.min(env.httpx.maxMinutes * 60_000, budgetFor(laterPhases)),
       threads: env.nuclei.concurrency,
       rateLimit: site.nucleiRateLimit,
-      headers: site.headers,
+      headersConfigFile,
       pruneStatusCodes: env.httpx.pruneStatusCodes,
       signal,
       logger,
@@ -262,7 +277,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
       concurrency: env.nuclei.concurrency,
       tags,
       excludeTags: riskExcludeTags(riskTags),
-      headers: site.headers,
+      headersConfigFile,
     })
     const phase = await runNucleiPhase({
       label: `nuclei-dast:${scanId}`,
@@ -305,7 +320,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
         rateLimit: site.nucleiRateLimit,
         concurrency: env.nuclei.concurrency,
         tags,
-        headers: site.headers,
+        headersConfigFile,
         excludeTags: riskExcludeTags(riskTags),
       })
       const phase = await runNucleiPhase({
@@ -358,7 +373,7 @@ export const runNuclei: EngineRunner = async ({ scanId, site, workDir, env, logg
         outputFile,
         rateLimit: site.nucleiRateLimit,
         concurrency: env.nuclei.concurrency,
-        headers: site.headers,
+        headersConfigFile,
       })
       const phase = await runNucleiPhase({
         label: `nuclei-openapi:${scanId}:${i}`,

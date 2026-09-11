@@ -51,7 +51,7 @@ describe('probeTargets', () => {
       timeoutMs: 60_000,
       threads: 2,
       rateLimit: 10,
-      headers: [],
+      headersConfigFile: null,
       pruneStatusCodes: [404],
       signal: new AbortController().signal,
       logger,

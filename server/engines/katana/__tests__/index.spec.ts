@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
@@ -18,6 +18,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 const args = process.argv.slice(2)
 fs.writeFileSync(path.join(process.cwd(), 'argv.json'), JSON.stringify(args))
+// what the -config file held while katana ran (it is removed afterwards)
+if (args.includes('-config'))
+  fs.copyFileSync(args[args.indexOf('-config') + 1], path.join(process.cwd(), 'seen-config.json'))
 const outFile = args[args.indexOf('-o') + 1]
 const seedsFile = args[args.indexOf('-list') + 1]
 const origin = new URL(fs.readFileSync(seedsFile, 'utf8').trim().split('\\n')[0]).origin
@@ -190,9 +193,15 @@ describe('runKatanaCrawl', () => {
       '-duc',
       '-eof',
       'raw,body,headers',
-      '-H',
-      'Cookie: token=secret',
+      '-config',
+      join(katanaDir, 'headers.json'),
     ])
+    // the secret reached katana through the 0600 config, which is gone now (#95)
+    expect(JSON.stringify(argv)).not.toContain('token=secret')
+    expect(JSON.parse(readFileSync(join(katanaDir, 'seen-config.json'), 'utf8'))).toEqual({
+      headers: ['Cookie: token=secret'],
+    })
+    expect(existsSync(join(katanaDir, 'headers.json'))).toBe(false)
   })
 
   it('rewrites the loopback host for the crawl and restores it in the result', async () => {

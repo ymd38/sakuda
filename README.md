@@ -205,7 +205,10 @@ remove the old container once with `docker rm -f sakuda-juice-shop`, then
 
 `data/scans/<scanId>/<engine>/` keeps each engine's raw logs and reports
 (stdout/stderr, ZAP's plan/report JSON, nuclei's JSONL output, the httpx
-probe's JSONL and argv — header values masked — under `nuclei/httpx/`). This can
+probe's JSONL and argv under `nuclei/httpx/`). The site's request headers
+reach nuclei, katana and httpx through a `headers.json` written next to the
+engine's files for the duration of the run only (0600, removed afterwards),
+never on the command line. This can
 contain target application data (response fragments, discovered paths) —
 treat the `data/` directory as sensitive, do not commit it or share it
 outside the team that owns the scanned target.

@@ -1,5 +1,4 @@
-import { headersToHeaderArgs } from '../../../domain/headerCipher'
-import type { Header } from '#shared/schemas/headers'
+import { headersConfigArgs } from '../../headersConfig'
 
 export interface HttpxArgsInput {
   /** One target URL per line — the exact list nuclei is about to receive. */
@@ -8,15 +7,14 @@ export interface HttpxArgsInput {
   threads: number
   /** `-rl`: the site's request-rate cap (req/s), shared with nuclei. */
   rateLimit: number
-  headers: Header[]
+  /** Path of the 0600 headers config shared with the nuclei phases, or null
+   * when the site has no headers — the values never go on argv (#95). */
+  headersConfigFile: string | null
 }
 
 /** Per-request timeout (`-timeout`, seconds). The run as a whole is bounded by
  * `runCommand`'s timeout above it. */
 export const HTTPX_REQUEST_TIMEOUT_SEC = 10
-
-/** Placeholder for a header value in the persisted argv (`args.json`). */
-export const REDACTED_HEADER_VALUE = '***'
 
 /**
  * A liveness probe, nothing more: one GET per target, no redirect following
@@ -52,22 +50,6 @@ export function buildHttpxArgs(i: HttpxArgsInput): string[] {
     String(i.threads),
     '-rl',
     String(i.rateLimit),
-    ...headersToHeaderArgs(i.headers),
+    ...headersConfigArgs(i.headersConfigFile),
   ]
-}
-
-/** The argv with every `-H` value replaced by `<name>: ***`, for the
- * `args.json` artifact — the site's auth headers must never land on disk in
- * the clear. Pure: the input array is not modified. */
-export function redactHttpxArgs(args: string[]): string[] {
-  const out = [...args]
-  for (let k = 0; k < out.length - 1; k++) {
-    if (out[k] !== '-H') continue
-    const value = out[k + 1]!
-    const colon = value.indexOf(':')
-    const name = colon === -1 ? value : value.slice(0, colon)
-    out[k + 1] = `${name}: ${REDACTED_HEADER_VALUE}`
-    k++
-  }
-  return out
 }

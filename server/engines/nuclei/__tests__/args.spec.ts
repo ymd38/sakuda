@@ -27,7 +27,7 @@ describe('buildNucleiArgs', () => {
         rateLimit: 50,
         concurrency: 25,
         tags: ['xss', 'sqli'],
-        headers: [{ name: 'Cookie', value: 'a=b' }],
+        headersConfigFile: '/w/headers.json',
       }),
     ).toEqual([
       '-l',
@@ -54,8 +54,8 @@ describe('buildNucleiArgs', () => {
       '-no-mhe',
       '-nc',
       '-omit-raw',
-      '-H',
-      'Cookie: a=b',
+      '-config',
+      '/w/headers.json',
     ])
   })
 
@@ -68,7 +68,7 @@ describe('buildNucleiArgs', () => {
         rateLimit: 50,
         concurrency: 25,
         tags: ['xss'],
-        headers: [],
+        headersConfigFile: null,
         browserStorage: [],
       }),
     ).toContain('-omit-raw')
@@ -84,7 +84,7 @@ describe('buildNucleiDastArgs (the active GET DAST phase)', () => {
     concurrency: 25,
     tags: ['sqli', 'cmdi'],
     excludeTags: ['dos', 'intrusive'],
-    headers: [{ name: 'Cookie', value: 'a=b' }],
+    headersConfigFile: '/w/headers.json',
   }
 
   it('loads only the DAST tree with -dast and the same tag filters as the signature phase', () => {
@@ -114,8 +114,8 @@ describe('buildNucleiDastArgs (the active GET DAST phase)', () => {
       '-no-mhe',
       '-nc',
       '-omit-raw',
-      '-H',
-      'Cookie: a=b',
+      '-config',
+      '/w/headers.json',
     ])
   })
 
@@ -136,7 +136,7 @@ describe('buildNucleiArgs is the signature phase in both modes', () => {
       concurrency: 25,
       tags: ['sqli', 'cmdi'],
       excludeTags: ['dos'],
-      headers: [],
+      headersConfigFile: null,
     })
     expect(args).not.toContain('-dast')
     expect(args.filter((a) => a === '-t')).toHaveLength(1)
@@ -154,7 +154,7 @@ describe('buildNucleiOpenapiArgs', () => {
     outputFile: '/w/openapi-findings-0.jsonl',
     rateLimit: 50,
     concurrency: 25,
-    headers: [{ name: 'Cookie', value: 'a=b' }],
+    headersConfigFile: '/w/headers.json',
   }
 
   it('imports the OpenAPI doc, loads only the DAST tree, no tag filter, -omit-raw kept', () => {
@@ -173,7 +173,7 @@ describe('buildNucleiOpenapiArgs', () => {
     expect(args).not.toContain('-tags')
     expect(args).not.toContain('-exclude-tags')
     expect(args).toContain('-omit-raw')
-    expect(args.slice(-2)).toEqual(['-H', 'Cookie: a=b'])
+    expect(args.slice(-2)).toEqual(['-config', '/w/headers.json'])
     expect(args.slice(args.indexOf('-severity'), args.indexOf('-severity') + 2)).toEqual([
       '-severity',
       'critical,high,medium',
@@ -189,7 +189,7 @@ describe('buildNucleiArgs excludeTags', () => {
     rateLimit: 50,
     concurrency: 25,
     tags: ['sqli'],
-    headers: [],
+    headersConfigFile: null,
   }
   const excludeOf = (args: string[]) => args[args.indexOf('-exclude-tags') + 1]
 
@@ -209,7 +209,7 @@ describe('buildNucleiArgs excludeTags', () => {
 })
 
 describe('host-error guard (#82)', () => {
-  const headers = [{ name: 'Cookie', value: 'a=b' }]
+  const headersConfigFile = '/w/headers.json'
 
   it('every phase passes -no-mhe: one skipped host would silently end the phase', () => {
     const signature = buildNucleiArgs({
@@ -219,7 +219,7 @@ describe('host-error guard (#82)', () => {
       rateLimit: 50,
       concurrency: 25,
       tags: ['sqli'],
-      headers,
+      headersConfigFile,
     })
     const dast = buildNucleiDastArgs({
       targetsFile: 't.txt',
@@ -229,7 +229,7 @@ describe('host-error guard (#82)', () => {
       concurrency: 25,
       tags: ['sqli'],
       excludeTags: ['dos'],
-      headers,
+      headersConfigFile,
     })
     const openapi = buildNucleiOpenapiArgs({
       openapiFile: '/w/openapi-0.json',
@@ -237,12 +237,55 @@ describe('host-error guard (#82)', () => {
       outputFile: 'oa.jsonl',
       rateLimit: 50,
       concurrency: 25,
-      headers,
+      headersConfigFile,
     })
     for (const args of [signature, dast, openapi]) {
       expect(args).toContain('-no-mhe')
       expect(args).not.toContain('-mhe')
       expect(args).not.toContain('-max-host-error')
+    }
+  })
+})
+
+describe('headers never on argv (#95)', () => {
+  it('passes -config <file> in every phase and nothing header-related without a file', () => {
+    const withFile = { headersConfigFile: '/w/headers.json' }
+    const without = { headersConfigFile: null }
+    const signature = (h: typeof withFile) =>
+      buildNucleiArgs({
+        targetsFile: 't',
+        templatesDir: '/tpl',
+        outputFile: 'o',
+        rateLimit: 1,
+        concurrency: 1,
+        tags: [],
+        ...h,
+      })
+    const dast = (h: typeof withFile) =>
+      buildNucleiDastArgs({
+        targetsFile: 't',
+        dastTemplatesDir: '/d',
+        outputFile: 'o',
+        rateLimit: 1,
+        concurrency: 1,
+        tags: [],
+        excludeTags: [],
+        ...h,
+      })
+    const openapi = (h: typeof withFile) =>
+      buildNucleiOpenapiArgs({
+        openapiFile: 'oa',
+        dastTemplatesDir: '/d',
+        outputFile: 'o',
+        rateLimit: 1,
+        concurrency: 1,
+        ...h,
+      })
+    for (const build of [signature, dast, openapi]) {
+      expect(build(withFile).slice(-2)).toEqual(['-config', '/w/headers.json'])
+      expect(build(withFile)).not.toContain('-H')
+      expect(build(without)).not.toContain('-config')
+      expect(build(without)).not.toContain('-H')
     }
   })
 })

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildHttpxArgs, redactHttpxArgs } from '../args'
+import { buildHttpxArgs } from '../args'
 
 describe('buildHttpxArgs', () => {
   const args = buildHttpxArgs({
     targetsFile: 't.txt',
     threads: 25,
     rateLimit: 50,
-    headers: [{ name: 'Cookie', value: 'a=b' }],
+    headersConfigFile: '/w/headers.json',
   })
 
   it('builds the exact argument array', () => {
@@ -27,8 +27,8 @@ describe('buildHttpxArgs', () => {
       '25',
       '-rl',
       '50',
-      '-H',
-      'Cookie: a=b',
+      '-config',
+      '/w/headers.json',
     ])
   })
 
@@ -44,33 +44,15 @@ describe('buildHttpxArgs', () => {
   })
 })
 
-describe('redactHttpxArgs', () => {
-  it('masks every -H value, keeps the header name, and leaves the rest untouched', () => {
+describe('headers never on argv (#95)', () => {
+  it('omits -config entirely when the site has no headers', () => {
     const args = buildHttpxArgs({
       targetsFile: 't.txt',
       threads: 1,
       rateLimit: 1,
-      headers: [
-        { name: 'Authorization', value: 'Bearer secret-token' },
-        { name: 'Cookie', value: 'session=abc; other=def' },
-      ],
+      headersConfigFile: null,
     })
-    const redacted = redactHttpxArgs(args)
-    expect(redacted).toEqual([
-      ...args.slice(0, args.indexOf('-H')),
-      '-H',
-      'Authorization: ***',
-      '-H',
-      'Cookie: ***',
-    ])
-    expect(redacted.join(' ')).not.toContain('secret-token')
-    expect(redacted.join(' ')).not.toContain('session=abc')
-    // pure
-    expect(args).toContain('Authorization: Bearer secret-token')
-  })
-
-  it('is a no-op without headers', () => {
-    const args = ['-l', 't.txt', '-json']
-    expect(redactHttpxArgs(args)).toEqual(args)
+    expect(args).not.toContain('-config')
+    expect(args).not.toContain('-H')
   })
 })

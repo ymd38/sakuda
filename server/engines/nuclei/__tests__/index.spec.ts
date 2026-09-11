@@ -353,6 +353,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 const args = process.argv.slice(2)
 const outFile = args[args.indexOf('-o') + 1]
+// what the -config headers file held while this phase ran (it is removed after the run)
+if (args.includes('-config'))
+  fs.copyFileSync(args[args.indexOf('-config') + 1], path.join(path.dirname(outFile), 'seen-headers-' + path.basename(outFile) + '.json'))
 fs.writeFileSync(path.join(path.dirname(outFile), 'argv-' + path.basename(outFile) + '.json'), JSON.stringify(args))
 fs.appendFileSync(path.join(path.dirname(outFile), 'order.log'), path.basename(outFile) + '\\n')
 fs.writeFileSync(outFile, '')
@@ -672,6 +675,8 @@ const path = require('node:path')
 const args = process.argv.slice(2)
 const targetsFile = args[args.indexOf('-l') + 1]
 fs.writeFileSync(path.join(path.dirname(targetsFile), 'argv.json'), JSON.stringify(args))
+if (args.includes('-config'))
+  fs.copyFileSync(args[args.indexOf('-config') + 1], path.join(path.dirname(targetsFile), 'seen-headers.json'))
 for (const input of fs.readFileSync(targetsFile, 'utf8').trim().split('\\n')) {
   const p = new URL(input).pathname
   if (p.endsWith('/silent')) continue
@@ -760,22 +765,59 @@ describe('runNuclei httpx liveness probe (#91)', () => {
     expect(out.meta.urlCount).toBe(4)
   })
 
-  it('writes its artifacts under nuclei/httpx/ (0600) with header values masked in args.json', async () => {
+  it('writes its artifacts under nuclei/httpx/ (0600); headers reach httpx via the run-scoped -config file, never argv (#95)', async () => {
     const { httpxDir, httpxArgv } = await run(site(), FAKE_HTTPX)
     for (const f of ['targets.txt', 'stdout.jsonl', 'stderr.log', 'args.json']) {
       const p = join(httpxDir, f)
       expect(existsSync(p), f).toBe(true)
       expect(statSync(p).mode & 0o777, f).toBe(0o600)
     }
-    // the real argv carried the header; the persisted one does not
-    expect(httpxArgv).toContain('Authorization: Bearer secret-token')
+    const headersFile = join(tmp, 'work', 'headers.json')
+    expect(httpxArgv).toContain('-config')
+    expect(httpxArgv![httpxArgv!.indexOf('-config') + 1]).toBe(headersFile)
+    expect(httpxArgv).not.toContain('-H')
+    expect(JSON.stringify(httpxArgv)).not.toContain('secret-token')
+    expect(readFileSync(join(httpxDir, 'args.json'), 'utf8')).not.toContain('secret-token')
     expect(httpxArgv).not.toContain('-fr')
     expect(httpxArgv).toContain('-nfs')
     expect(httpxArgv).toContain('-probe')
-    const persisted = readFileSync(join(httpxDir, 'args.json'), 'utf8')
-    expect(persisted).toContain('Authorization: ***')
-    expect(persisted).not.toContain('secret-token')
+    // httpx could read the headers while it ran; the file is gone once the run ends
+    expect(JSON.parse(readFileSync(join(httpxDir, 'seen-headers.json'), 'utf8'))).toEqual({
+      header: ['Authorization: Bearer secret-token'],
+    })
+    expect(existsSync(headersFile)).toBe(false)
     expect(readFileSync(join(httpxDir, 'stdout.jsonl'), 'utf8')).toContain('"status_code":404')
+  })
+
+  it('shares the same headers file with every nuclei phase and passes no -config without headers (#95)', async () => {
+    const withHeaders = await run(
+      baseSite({
+        allowMutatingRequests: true,
+        nucleiPaths: '/search?q=',
+        headers: [{ name: 'Cookie', value: 'token=secret' }],
+      }),
+      FAKE_HTTPX,
+    )
+    const workDir = join(tmp, 'work')
+    const headersFile = join(workDir, 'headers.json')
+    // as: written by the fake nuclei as JSON string[]
+    const argvOf = (output: string) =>
+      JSON.parse(readFileSync(join(workDir, `argv-${output}.json`), 'utf8')) as string[]
+    for (const phase of ['findings.jsonl', 'dast-findings.jsonl']) {
+      const argv = argvOf(phase)
+      expect(argv.slice(-2), phase).toEqual(['-config', headersFile])
+      expect(JSON.stringify(argv), phase).not.toContain('token=secret')
+      expect(
+        JSON.parse(readFileSync(join(workDir, `seen-headers-${phase}.json`), 'utf8')),
+        phase,
+      ).toEqual({ header: ['Cookie: token=secret'] })
+    }
+    expect(existsSync(headersFile)).toBe(false)
+    void withHeaders
+
+    const without = await run(baseSite({ nucleiPaths: '/plain' }), FAKE_HTTPX)
+    expect(argvOf('findings.jsonl')).not.toContain('-config')
+    expect(without.httpxArgv).not.toContain('-config')
   })
 
   it('with the opt-in drops only the target httpx positively saw on the list; unknown stays', async () => {
