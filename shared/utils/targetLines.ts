@@ -13,7 +13,11 @@ export interface TargetLineSite {
 }
 
 /** Renders a saved target line: `POST /x`, `api:/x`, `/x` (GET, no prefix). */
-function formatTargetLine(method: TargetMethod, base: 'front' | 'api', path: string): string {
+export function formatTargetLine(
+  method: TargetMethod,
+  base: 'front' | 'api',
+  path: string,
+): string {
   const prefix = method === 'GET' ? '' : `${method} `
   return `${prefix}${base === 'api' ? 'api:' : ''}${path}`
 }

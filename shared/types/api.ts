@@ -1,4 +1,5 @@
 import type { BrowserStorageName } from '../schemas/browserStorage'
+import type { TargetMethod } from '../utils/nucleiPaths'
 
 export type Engine = 'nuclei' | 'zap-api' | 'zap-fe' | 'dalfox'
 export const RISK_TAGS = ['dos', 'fuzz', 'intrusive'] as const
@@ -204,6 +205,41 @@ export interface AddTargetsResult {
 export interface RemoveTargetResult {
   site: SitePublic
   removed: boolean
+}
+
+/** One saved target line as the engines see it: method, base and the
+ * relative path (query included, host never) — the same identity as
+ * `targetLineKey`. Never carries a body shape or a header. */
+export interface TargetRef {
+  method: TargetMethod
+  base: 'front' | 'api'
+  path: string
+}
+/** What one engine does with the saved list on the next scan. */
+export interface EngineTargets {
+  /** False when the engine cannot run with the site as configured (dalfox
+   * without active checks, ZAP API without any OpenAPI source). */
+  available: boolean
+  /** Saved lines the engine will request. */
+  targets: TargetRef[]
+  /** Saved lines the engine leaves alone: wrong base, a hash route it cannot
+   * reach, or a mutating method on a passive run. */
+  skipped: TargetRef[]
+}
+/** `GET /api/sites/:id/targets`: the saved list every engine shares, and the
+ * per-engine view of it — computed by `summarizeTargets`, never edited here. */
+export interface TargetSummary {
+  /** False when no line is saved (nuclei then scans the base URL roots). */
+  configured: boolean
+  /** The value of `isActiveScanEnabled` the engines will read. */
+  activeChecks: boolean
+  /** Saved lines after Exclude paths, in saved order. */
+  common: TargetRef[]
+  /** GET lines dropped by Exclude paths (count only). */
+  excludedCount: number
+  engines: Record<Engine, EngineTargets>
+  /** Where ZAP API's operations come from on the next scan. */
+  zapApiSource: 'openapi' | 'generated' | 'openapi+generated' | 'none'
 }
 /** One running or queued job, across all sites. Returned by `GET /api/jobs`
  * in the job loop's claim order (running first, then queued scans oldest-first,

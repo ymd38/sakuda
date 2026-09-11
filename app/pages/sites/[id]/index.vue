@@ -3,9 +3,19 @@ import ScanStatusBadge from '~/components/scan/ScanStatusBadge.vue'
 import SeverityStackChart from '~/components/chart/SeverityStackChart.vue'
 import EngineCountChart from '~/components/chart/EngineCountChart.vue'
 import DiffTrendChart from '~/components/chart/DiffTrendChart.vue'
-import type { Engine, HistoryPoint, ScanSummary, SitePublic } from '#shared/types/api'
+import type {
+  Engine,
+  EngineTargets,
+  HistoryPoint,
+  ScanSummary,
+  SitePublic,
+  TargetRef,
+  TargetSummary,
+} from '#shared/types/api'
 import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
 import { isActiveScanEnabled } from '#shared/utils/activeScan'
+import { ENGINE_LABELS, ENGINE_ORDER } from '#shared/utils/engines'
+import { formatTargetLine } from '#shared/utils/targetLines'
 
 const route = useRoute()
 // `route.params.id` is `string | string[]` generically; this route only has
@@ -16,6 +26,9 @@ const siteId = Array.isArray(rawSiteId) ? (rawSiteId[0] ?? '') : rawSiteId
 const { data: site, error: siteError } = await useFetch<SitePublic>(`/api/sites/${siteId}`)
 const { data: scans } = await useFetch<ScanSummary[]>(`/api/sites/${siteId}/scans`)
 const { data: history } = await useFetch<HistoryPoint[]>(`/api/sites/${siteId}/history`)
+// Read-only: the saved list and what each engine will do with it. Editing
+// (discovery, save, remove) lives on the Edit page.
+const { data: targetSummary } = await useFetch<TargetSummary>(`/api/sites/${siteId}/targets`)
 
 const nucleiChecked = ref(true)
 const zapApiChecked = ref(false)
@@ -31,6 +44,40 @@ const savedTargetCount = computed(() =>
   site.value ? parseNucleiPathLines(site.value.nucleiPaths).lines.length : 0,
 )
 const nucleiScansRootOnly = computed(() => !!site.value && savedTargetCount.value === 0)
+
+const lineOf = (t: TargetRef) => formatTargetLine(t.method, t.base, t.path)
+const engineRows = computed(() =>
+  ENGINE_ORDER.map((engine) => ({
+    engine,
+    label: ENGINE_LABELS[engine],
+    view: targetSummary.value?.engines[engine] ?? null,
+  })),
+)
+/** One line per engine on why lines are left alone or where they come from —
+ * the rule the engine adapter applies, stated for the reader. */
+function engineNote(engine: Engine, view: EngineTargets): string {
+  const summary = targetSummary.value
+  if (!summary) return ''
+  switch (engine) {
+    case 'nuclei':
+      return summary.configured
+        ? 'Server-side: hash routes are left to the ZAP frontend DOM probe; non-GET lines are replayed only under active checks.'
+        : 'No target paths saved — scans the base URL root(s) only.'
+    case 'zap-fe':
+      return 'Requests the front-base lines before its spiders run; hash routes are opened in a browser (DOM XSS probe) and mutating methods are sent only under active checks.'
+    case 'zap-api':
+      return {
+        none: 'No OpenAPI URL or JSON, and no non-GET line to build one from under active checks.',
+        openapi: 'Operations come from the OpenAPI document; saved lines are not used.',
+        generated: 'Operations are generated from the non-GET lines (active checks).',
+        'openapi+generated': 'OpenAPI document plus a generated one from the non-GET lines.',
+      }[summary.zapApiSource]
+    case 'dalfox':
+      return view.available
+        ? 'GET lines the server can reach; hash routes belong to the DOM probe.'
+        : 'Runs only under active checks.'
+  }
+}
 // dalfox sends attack payloads, so it can run only under active injection checks.
 const dalfoxAvailable = computed(() => !!site.value && isActiveScanEnabled(site.value))
 const zapApiAvailable = computed(
@@ -105,6 +152,87 @@ async function handleStartScan() {
           One saved list, read by every engine. Discover URLs, review and save or remove them in
           Edit — you only need to discover again when the site changes.
         </p>
+
+        <template v-if="targetSummary">
+          <p
+            v-if="!targetSummary.configured"
+            class="text-caption-md text-mute"
+            data-testid="no-common-targets"
+          >
+            Nothing saved yet — nuclei falls back to the base URL root(s); the other engines work
+            from their own crawl or OpenAPI document.
+          </p>
+          <ul
+            v-else
+            class="flex flex-col gap-1 font-mono text-caption-md"
+            data-testid="common-targets"
+          >
+            <li v-for="t in targetSummary.common" :key="lineOf(t)" class="break-all">
+              {{ lineOf(t) }}
+            </li>
+          </ul>
+          <p
+            v-if="targetSummary.excludedCount > 0"
+            class="text-caption-sm text-mute"
+            data-testid="excluded-target-count"
+          >
+            {{ targetSummary.excludedCount }} line{{ targetSummary.excludedCount === 1 ? '' : 's' }}
+            dropped by Exclude paths.
+          </p>
+
+          <div class="overflow-x-auto">
+            <table class="text-caption-md w-full" data-testid="engine-targets">
+              <thead>
+                <tr class="text-mute text-left">
+                  <th class="pb-2 pr-4">Engine</th>
+                  <th class="pb-2 pr-4 whitespace-nowrap">Targets</th>
+                  <th class="pb-2 pr-4 whitespace-nowrap">Left alone</th>
+                  <th class="pb-2">How it uses the list</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in engineRows"
+                  :key="row.engine"
+                  class="border-hairline-soft border-t align-top"
+                  :data-testid="`engine-targets-${row.engine}`"
+                >
+                  <td class="py-2 pr-4 whitespace-nowrap">
+                    {{ row.label }}
+                    <span v-if="row.view && !row.view.available" class="badge text-mute ml-2"
+                      >unavailable</span
+                    >
+                  </td>
+                  <td class="py-2 pr-4">
+                    <details v-if="row.view && row.view.targets.length > 0">
+                      <summary class="cursor-pointer">{{ row.view.targets.length }}</summary>
+                      <ul class="mt-1 font-mono">
+                        <li v-for="t in row.view.targets" :key="lineOf(t)" class="break-all">
+                          {{ lineOf(t) }}
+                        </li>
+                      </ul>
+                    </details>
+                    <template v-else>0</template>
+                  </td>
+                  <td class="py-2 pr-4">
+                    <details v-if="row.view && row.view.skipped.length > 0">
+                      <summary class="cursor-pointer">{{ row.view.skipped.length }}</summary>
+                      <ul class="mt-1 font-mono">
+                        <li v-for="t in row.view.skipped" :key="lineOf(t)" class="break-all">
+                          {{ lineOf(t) }}
+                        </li>
+                      </ul>
+                    </details>
+                    <template v-else>0</template>
+                  </td>
+                  <td class="text-mute py-2">
+                    {{ row.view ? engineNote(row.engine, row.view) : '' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </section>
 
       <section class="card mt-6 flex flex-col gap-4">

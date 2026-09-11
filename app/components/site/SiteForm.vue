@@ -25,9 +25,11 @@ const isEditMode = computed(() => !!props.initial)
  * which engine reads it. */
 const ENGINE_BADGE = {
   all: 'All engines',
+  discovery: 'Discovery',
   nuclei: 'Nuclei',
   zapFe: 'ZAP frontend',
   zapApi: 'ZAP API',
+  dalfox: 'Dalfox',
 } as const
 
 const form = reactive({
@@ -234,9 +236,11 @@ function handleSubmit() {
     <div class="card flex flex-col gap-1 text-caption-sm text-mute" data-testid="form-legend">
       <p><span class="text-sale">*</span> = required. Everything else can stay empty.</p>
       <p>
-        Fields are grouped by the engine that reads them. <strong>ZAP frontend</strong> runs with
-        just the site section · <strong>Nuclei</strong> scans the base URL plus any target paths ·
-        <strong>ZAP API</strong> needs an OpenAPI URL or JSON.
+        Fields are grouped by who reads them. <strong>Site</strong> and
+        <strong>Targets</strong> feed every engine · <strong>Discovery</strong> only steers
+        "Discover URLs" · <strong>ZAP frontend</strong> runs with just the site section ·
+        <strong>Nuclei</strong> scans the base URL plus the targets · <strong>ZAP API</strong> needs
+        an OpenAPI URL or JSON · <strong>Dalfox</strong> needs active checks.
       </p>
     </div>
 
@@ -331,11 +335,11 @@ function handleSubmit() {
       </div>
     </fieldset>
 
-    <!-- Nuclei: signature/DAST checks against a fixed target list -->
-    <fieldset data-testid="section-nuclei" class="card border-hairline flex flex-col gap-6">
+    <!-- Targets: the one saved list every engine reads -->
+    <fieldset data-testid="section-targets" class="card border-hairline flex flex-col gap-6">
       <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
-        <span class="font-display text-heading-lg uppercase">Nuclei</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.nuclei }}</span>
+        <span class="font-display text-heading-lg uppercase">Targets</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.all }}</span>
       </legend>
 
       <div class="flex flex-col gap-2">
@@ -352,14 +356,75 @@ function handleSubmit() {
           class="textarea-soft"
         />
         <p class="text-caption-sm text-mute">
-          The URLs Nuclei scans — one path per line, relative to the front base URL; prefix "api:"
-          only for paths on the API base URL. Nuclei does not crawl: use "Discover URLs" above to
-          fill this list from ZAP's spiders and katana, or hand-list the pages and endpoints you
+          The one saved list every engine reads — Nuclei scans it, the ZAP frontend requests it
+          before its spiders run (and DOM-probes hash routes), ZAP API builds a request document
+          from its non-GET lines, dalfox tests its GET lines. One path per line, relative to the
+          front base URL; prefix "api:" only for paths on the API base URL. Use "Discover URLs"
+          above to fill it from ZAP's spiders and katana, or hand-list the pages and endpoints you
           care about (top page, login, API routes with query params). A line may start with an HTTP
-          method, e.g. "POST /api/x" — method omitted means GET. Non-GET targets can be saved (and
-          are kept through discovery), but are not replayed yet. "#" starts a comment.
+          method, e.g. "POST /api/x" — method omitted means GET; non-GET lines are replayed only
+          under active checks. "#" starts a comment.
         </p>
       </div>
+    </fieldset>
+
+    <!-- Discovery: where "Discover URLs" starts and how far it may crawl — no engine reads these -->
+    <fieldset data-testid="section-discovery" class="card border-hairline flex flex-col gap-6">
+      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span class="font-display text-heading-lg uppercase">Discovery</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.discovery }}</span>
+      </legend>
+
+      <div class="flex flex-col gap-2">
+        <label for="site-discovery-seed-paths" class="text-caption-md font-medium text-ink"
+          >Discovery seed paths
+          <span class="text-mute">(optional — empty uses the ZAP frontend seed path)</span></label
+        >
+        <textarea
+          id="site-discovery-seed-paths"
+          v-model="form.discoverySeedPaths"
+          data-testid="discovery-seed-paths"
+          rows="3"
+          placeholder="/#/&#10;/#/search?q=apple&#10;/#/basket&#10;/profile"
+          class="textarea-soft"
+        />
+        <p class="text-caption-sm text-mute">
+          Where "Discover URLs" (ZAP's spiders and katana, crawl-only) starts, one path per line;
+          each gets its own Ajax spider run. List the pages of your app (hash routes are fine) so
+          the APIs behind them are found and can be saved as target paths. Discovery only — no scan
+          engine reads this.
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label for="site-crawl-scope-paths" class="text-caption-md font-medium text-ink"
+          >Crawl scope paths
+          <span class="text-mute">(optional — empty crawls the whole origin)</span></label
+        >
+        <textarea
+          id="site-crawl-scope-paths"
+          v-model="form.crawlScopePaths"
+          data-testid="crawl-scope-paths"
+          rows="3"
+          placeholder="/app&#10;/rest"
+          class="textarea-soft"
+        />
+        <p class="text-caption-sm text-mute">
+          Seed paths are where a crawl starts; this is how far it may go. One path prefix per line:
+          "Discover URLs" (ZAP's spiders and katana) and the ZAP frontend scan's spider then only
+          follow URLs under these prefixes (plus the API base URL and the seed pages themselves). An
+          API outside the prefixes, e.g. "/api/…", is not included on its own — add it as a line or
+          set it as the API base URL.
+        </p>
+      </div>
+    </fieldset>
+
+    <!-- Nuclei: signature/DAST checks against a fixed target list -->
+    <fieldset data-testid="section-nuclei" class="card border-hairline flex flex-col gap-6">
+      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span class="font-display text-heading-lg uppercase">Nuclei</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.nuclei }}</span>
+      </legend>
 
       <div class="flex flex-col gap-2 sm:max-w-80">
         <label for="site-nuclei-rate-limit" class="text-caption-md font-medium text-ink"
@@ -473,48 +538,6 @@ function handleSubmit() {
         <p class="text-caption-sm text-mute">
           Caps the frontend active scan, which runs only when Active injection checks (below) is on.
           Shared with the ZAP API section — editing it here changes it there too.
-        </p>
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <label for="site-discovery-seed-paths" class="text-caption-md font-medium text-ink"
-          >Discovery seed paths
-          <span class="text-mute">(optional — empty uses the seed path above)</span></label
-        >
-        <textarea
-          id="site-discovery-seed-paths"
-          v-model="form.discoverySeedPaths"
-          data-testid="discovery-seed-paths"
-          rows="3"
-          placeholder="/#/&#10;/#/search?q=apple&#10;/#/basket&#10;/profile"
-          class="textarea-soft"
-        />
-        <p class="text-caption-sm text-mute">
-          Where "Discover URLs" (ZAP's crawl-only run) starts, one path per line; each gets its own
-          Ajax spider run. List the pages of your app (hash routes are fine) so the APIs behind them
-          are found and can be saved as Nuclei target paths. Not used by Nuclei itself.
-        </p>
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <label for="site-crawl-scope-paths" class="text-caption-md font-medium text-ink"
-          >Crawl scope paths
-          <span class="text-mute">(optional — empty crawls the whole origin)</span></label
-        >
-        <textarea
-          id="site-crawl-scope-paths"
-          v-model="form.crawlScopePaths"
-          data-testid="crawl-scope-paths"
-          rows="3"
-          placeholder="/app&#10;/rest"
-          class="textarea-soft"
-        />
-        <p class="text-caption-sm text-mute">
-          Seed paths are where a crawl starts; this is how far it may go. One path prefix per line:
-          "Discover URLs" and the ZAP frontend spider then only follow URLs under these prefixes
-          (plus the API base URL and the seed pages themselves), and katana is told the same scope.
-          An API outside the prefixes, e.g. "/api/…", is not included on its own — add it as a line
-          or set it as the API base URL.
         </p>
       </div>
 
@@ -644,6 +667,8 @@ function handleSubmit() {
         <span class="font-display text-heading-lg uppercase">Active checks</span>
         <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.nuclei }}</span>
         <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapFe }}</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapApi }}</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.dalfox }}</span>
       </legend>
 
       <div class="flex flex-col gap-2">

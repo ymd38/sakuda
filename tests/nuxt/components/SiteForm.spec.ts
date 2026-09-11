@@ -510,6 +510,8 @@ describe('SiteForm', () => {
     const sections = wrapper.findAll('fieldset[data-testid^="section-"]')
     expect(sections.map((s) => s.attributes('data-testid'))).toEqual([
       'section-site',
+      'section-targets',
+      'section-discovery',
       'section-nuclei',
       'section-zap-fe',
       'section-zap-api',
@@ -527,19 +529,25 @@ describe('SiteForm', () => {
       expect(s.find('legend .text-heading-lg').exists()).toBe(true)
     }
     expect(badgesOf('section-site')).toEqual(['All engines'])
+    expect(badgesOf('section-targets')).toEqual(['All engines'])
+    expect(badgesOf('section-discovery')).toEqual(['Discovery'])
     expect(badgesOf('section-nuclei')).toEqual(['Nuclei'])
     expect(badgesOf('section-zap-fe')).toEqual(['ZAP frontend'])
     expect(badgesOf('section-zap-api')).toEqual(['ZAP API'])
-    expect(badgesOf('section-active')).toEqual(['Nuclei', 'ZAP frontend'])
+    expect(badgesOf('section-active')).toEqual(['Nuclei', 'ZAP frontend', 'ZAP API', 'Dalfox'])
     expect(badgesOf('section-auth')).toEqual(['All engines'])
 
     // each field sits in the section of the engine that reads it
     const within = (testid: string, field: string) =>
       wrapper.find(`[data-testid="${testid}"] [data-testid="${field}"]`).exists()
-    expect(within('section-nuclei', 'nuclei-paths')).toBe(true)
+    // the shared target list and the discovery-only fields sit outside any engine section
+    expect(within('section-targets', 'nuclei-paths')).toBe(true)
+    expect(within('section-discovery', 'discovery-seed-paths')).toBe(true)
+    expect(within('section-discovery', 'crawl-scope-paths')).toBe(true)
+    expect(within('section-site', 'exclude-paths')).toBe(true)
+    expect(within('section-nuclei', 'nuclei-rate-limit')).toBe(true)
     expect(within('section-nuclei', 'risk-tag-fuzz')).toBe(true)
-    expect(within('section-zap-fe', 'discovery-seed-paths')).toBe(true)
-    expect(within('section-zap-fe', 'crawl-scope-paths')).toBe(true)
+    expect(within('section-zap-fe', 'zap-fe-seed-path')).toBe(true)
     expect(within('section-zap-fe', 'add-storage')).toBe(true)
     expect(within('section-zap-api', 'openapi-json')).toBe(true)
     expect(within('section-zap-api', 'zap-api-max-minutes')).toBe(true)
