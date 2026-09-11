@@ -19,6 +19,7 @@ import {
   getSite,
   listSites,
   loadSiteWithHeaders,
+  removeSiteTarget,
   updateSite,
   type SiteServiceDeps,
 } from '../siteService'
@@ -350,6 +351,55 @@ describe('siteService', () => {
 
     it('throws 404 for an unknown site', () => {
       expect(() => addSiteTargets(deps, 'nope', ['/'])).toThrow(/not found/)
+    })
+  })
+
+  describe('removeSiteTarget', () => {
+    it('removes the matching line, keeps the others, and bumps updatedAt', () => {
+      const s = createSite(deps, base) // nucleiPaths: '/\n/api/products'
+      deps.now = () => new Date('2026-02-01T00:00:00Z')
+      const r = removeSiteTarget(deps, s.id, 'GET /api/products')
+      expect(r.removed).toBe(true)
+      expect(r.site.nucleiPaths).toBe('/')
+      expect(r.site.updatedAt).toBe('2026-02-01T00:00:00.000Z')
+      expect(getSite(deps.db, s.id)?.nucleiPaths).toBe('/')
+    })
+
+    it('is idempotent: a line that is not saved changes nothing (no updatedAt bump)', () => {
+      const s = createSite(deps, base)
+      deps.now = () => new Date('2026-02-01T00:00:00Z')
+      const r = removeSiteTarget(deps, s.id, '/missing')
+      expect(r.removed).toBe(false)
+      expect(r.site.nucleiPaths).toBe(s.nucleiPaths)
+      expect(r.site.updatedAt).toBe(s.updatedAt)
+    })
+
+    it('drops the request shape saved under the removed line', () => {
+      const s = createSite(deps, base)
+      const shape = {
+        line: 'POST /rest/user/login',
+        contentType: 'application/json',
+        bodyShape: { kind: 'form' as const, fields: ['email', 'password'] },
+      }
+      addSiteTargets(
+        deps,
+        s.id,
+        ['POST /rest/user/login', 'POST /rest/other'],
+        [shape, { ...shape, line: 'POST /rest/other' }],
+      )
+      const r = removeSiteTarget(deps, s.id, 'POST /rest/user/login')
+      expect(r.site.nucleiPaths).toBe('/\n/api/products\nPOST /rest/other\n')
+      expect(Object.keys(r.site.requestShapes)).toEqual(['POST|front|/rest/other'])
+    })
+
+    it('rejects an invalid line with 422 and writes nothing', () => {
+      const s = createSite(deps, base)
+      expect(() => removeSiteTarget(deps, s.id, 'http://absolute.example/x')).toThrow(ServiceError)
+      expect(getSite(deps.db, s.id)?.nucleiPaths).toBe(s.nucleiPaths)
+    })
+
+    it('throws 404 for an unknown site', () => {
+      expect(() => removeSiteTarget(deps, 'nope', '/')).toThrow(ServiceError)
     })
   })
 

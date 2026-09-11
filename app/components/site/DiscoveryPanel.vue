@@ -4,6 +4,7 @@ import type {
   BodyShape,
   DiscoveredUrl,
   DiscoverySummary,
+  RemoveTargetResult,
   SitePublic,
 } from '#shared/types/api'
 import { isActiveScanEnabled } from '#shared/utils/activeScan'
@@ -12,7 +13,9 @@ import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
 import { urlToTargetLine } from '#shared/utils/targetLines'
 
 const props = defineProps<{ site: SitePublic }>()
-const emit = defineEmits<{ saved: [site: SitePublic] }>()
+// Both events hand back the server's updated site: the host page swaps its
+// copy so the saved badges (and any form bound to nucleiPaths) follow.
+const emit = defineEmits<{ saved: [site: SitePublic]; removed: [site: SitePublic] }>()
 
 const seeds = computed(() => resolveDiscoverySeeds(props.site))
 // Same gate the engines read (katana -aff, ZAP postForm): the warning must
@@ -173,6 +176,31 @@ async function saveTargets() {
   }
 }
 
+// --- un-saving a line -----------------------------------------------------
+
+const removingLine = ref<string | null>(null)
+const removeError = ref<string | null>(null)
+
+/** Removes one saved line from the site's targets (all engines read that
+ * list), so a wrongly approved URL can be dropped here rather than by editing
+ * the whole text in the form. */
+async function removeTarget(line: string) {
+  removingLine.value = line
+  removeError.value = null
+  saveMessage.value = null
+  try {
+    const result = await $fetch<RemoveTargetResult>(`/api/sites/${props.site.id}/targets`, {
+      method: 'DELETE',
+      body: { line },
+    })
+    emit('removed', result.site)
+  } catch (err) {
+    removeError.value = toApiErrorMessage(err)
+  } finally {
+    removingLine.value = null
+  }
+}
+
 function droppedSummary(meta: Record<string, unknown>): string | null {
   const dropped = meta['dropped']
   if (typeof dropped !== 'object' || dropped === null) return null
@@ -292,6 +320,16 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
                 <td class="py-1 pr-4 align-top break-all">
                   {{ row.line ?? row.url.url }}
                   <span v-if="row.saved" class="badge text-mute ml-2">saved</span>
+                  <button
+                    v-if="row.saved && row.line !== null"
+                    type="button"
+                    class="text-ink ml-2 underline"
+                    data-testid="remove-target"
+                    :disabled="removingLine !== null"
+                    @click="removeTarget(row.line)"
+                  >
+                    {{ removingLine === row.line ? 'Removing…' : 'Remove' }}
+                  </button>
                   <span
                     v-if="row.url.bodyShape"
                     class="badge text-mute ml-2"
@@ -326,6 +364,9 @@ function droppedSummary(meta: Record<string, unknown>): string | null {
       />
     </div>
 
+    <p v-if="removeError" data-testid="remove-error" class="text-sale text-body-md">
+      {{ removeError }}
+    </p>
     <p v-if="saveError" data-testid="save-error" class="text-sale text-body-md">{{ saveError }}</p>
     <p v-if="saveMessage" data-testid="save-message" class="text-success text-body-md">
       {{ saveMessage }}

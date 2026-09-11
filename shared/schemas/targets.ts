@@ -22,3 +22,11 @@ export const AddTargetsBodySchema = z.object({
 
 export type AddTargetsBody = z.infer<typeof AddTargetsBodySchema>
 export type TargetShape = z.infer<typeof TargetShapeSchema>
+
+/** Body of `DELETE /api/sites/:id/targets`: the one saved target line to
+ * remove (same grammar as `lines`; identity is method + base + path). */
+export const RemoveTargetBodySchema = z.object({
+  line: z.string().min(1).max(2_000),
+})
+
+export type RemoveTargetBody = z.infer<typeof RemoveTargetBodySchema>

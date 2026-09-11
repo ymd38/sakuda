@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import type { BrowserStorageKind, BrowserStoragePatch } from '#shared/schemas/browserStorage'
 import { BROWSER_STORAGE_KINDS } from '#shared/schemas/browserStorage'
 import type { HeaderPatch } from '#shared/schemas/headers'
@@ -48,6 +48,18 @@ const form = reactive({
   allowMutatingRequests: props.initial?.allowMutatingRequests ?? false,
   nucleiEnabledRiskTags: [...(props.initial?.nucleiEnabledRiskTags ?? [])] as RiskTag[],
 })
+
+// Target paths is the one field with a second writer: the discovery panel on
+// the Edit page saves/removes lines server-side and hands back the updated
+// site. Mirror that here, or "Save changes" would PUT the stale text and undo
+// it. The server value wins over an unsaved edit of this field — the panel's
+// result is committed state; the textarea's is not.
+watch(
+  () => props.initial?.nucleiPaths,
+  (next) => {
+    if (next !== undefined) form.nucleiPaths = next
+  },
+)
 
 /** nuclei risk-template groups the user can opt into (see server/domain/activeScan);
  * each is excluded by default and needs Active injection checks on to take effect. */
@@ -341,9 +353,9 @@ function handleSubmit() {
         />
         <p class="text-caption-sm text-mute">
           The URLs Nuclei scans — one path per line, relative to the front base URL; prefix "api:"
-          only for paths on the API base URL. Nuclei does not crawl: use "Discover URLs" on the site
-          page to fill this list from ZAP's spider, or hand-list the pages and endpoints you care
-          about (top page, login, API routes with query params). A line may start with an HTTP
+          only for paths on the API base URL. Nuclei does not crawl: use "Discover URLs" above to
+          fill this list from ZAP's spiders and katana, or hand-list the pages and endpoints you
+          care about (top page, login, API routes with query params). A line may start with an HTTP
           method, e.g. "POST /api/x" — method omitted means GET. Non-GET targets can be saved (and
           are kept through discovery), but are not replayed yet. "#" starts a comment.
         </p>

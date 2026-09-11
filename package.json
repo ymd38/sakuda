@@ -1,6 +1,7 @@
 {
   "name": "sakuda",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.26.1",
   "engines": {

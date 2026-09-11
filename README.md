@@ -367,3 +367,10 @@ site-tree dump; katana's seeds, logs and JSONL under `katana/`) live under
 - Scheduled/recurring scans
 - Notifications (email/Slack/etc.)
 - Multi-user accounts or access control
+
+## License
+
+[MIT](LICENSE). The scan engines sakuda drives are separate projects under
+their own licenses: nuclei, katana, httpx, dalfox and nuclei-templates (MIT)
+are downloaded, checksum-verified, at image build time, and ZAP (Apache-2.0)
+is the image's base layer. None of them is vendored into this repository.

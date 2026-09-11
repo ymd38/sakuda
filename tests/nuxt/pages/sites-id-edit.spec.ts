@@ -33,6 +33,16 @@ describe('pages/sites/[id]/edit', () => {
   beforeEach(() => {
     clearNuxtData()
     registerEndpoint(`/api/sites/${site.id}`, () => site)
+    registerEndpoint(`/api/sites/${site.id}/discoveries`, () => [])
+  })
+
+  it('hosts the Discover URLs panel above the form — targets are edited here', async () => {
+    const wrapper = await mountSuspended(SiteEditPage, { route: `/sites/${site.id}/edit` })
+    const section = wrapper.find('[data-testid="targets-section"]')
+    expect(section.exists()).toBe(true)
+    expect(section.find('[data-testid="discovery-panel"]').exists()).toBe(true)
+    expect(section.find('[data-testid="start-discovery"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="nuclei-paths"]').exists()).toBe(true)
   })
 
   it('offers a Cancel link back to the site page, beside Save', async () => {

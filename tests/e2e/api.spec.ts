@@ -141,6 +141,26 @@ describe('api e2e', () => {
     })
   })
 
+  it('DELETE /api/sites/:id/targets removes one saved line, idempotently', async () => {
+    const del = (line: string) =>
+      fetch(`/api/sites/${siteId}/targets`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ line }),
+      })
+    const res = await del('/login')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      removed: true,
+      site: { id: siteId, nucleiPaths: '/\n/rest/products/search?q=\n' },
+    })
+    const again = await del('/login')
+    expect(again.status).toBe(200)
+    expect(await again.json()).toMatchObject({ removed: false })
+    const site = await fetch(`/api/sites/${siteId}`)
+    expect(await site.json()).toMatchObject({ nucleiPaths: '/\n/rest/products/search?q=\n' })
+  })
+
   it('GET /api/sites/:id/discoveries lists nothing for a site that never discovered', async () => {
     const res = await fetch(`/api/sites/${siteId}/discoveries`)
     expect(res.status).toBe(200)

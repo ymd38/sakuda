@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mergeTargetLines, urlToTargetLine } from '#shared/utils/targetLines'
+import { mergeTargetLines, removeTargetLine, urlToTargetLine } from '#shared/utils/targetLines'
 
 const site = { frontBaseUrl: 'http://localhost:3000', apiBaseUrl: 'http://localhost:8080' }
 
@@ -71,5 +71,49 @@ describe('mergeTargetLines', () => {
     expect(r.added).toEqual(['POST /x'])
     expect(r.skipped).toEqual(['GET /x', '/x', 'POST /x'])
     expect(r.text).toBe('/x\nPOST /x\n')
+  })
+})
+
+describe('removeTargetLine', () => {
+  it('removes the matching line and keeps comments, blanks and the other lines verbatim', () => {
+    const existing = '# mine\n/\n\n/login\nPOST /login\n'
+    const r = removeTargetLine(existing, '/login')
+    expect(r).toEqual({ text: '# mine\n/\n\nPOST /login\n', removed: true, invalid: false })
+  })
+
+  it('matches by method|base|path: bare, GET and lowercase forms are the same line; POST is not', () => {
+    const existing = '/x\nPOST /x\napi:/x\n'
+    expect(removeTargetLine(existing, 'GET /x').text).toBe('POST /x\napi:/x\n')
+    expect(removeTargetLine(existing, 'get /x').text).toBe('POST /x\napi:/x\n')
+    expect(removeTargetLine(existing, 'api:/x').text).toBe('/x\nPOST /x\n')
+    expect(removeTargetLine(existing, 'POST /x').text).toBe('/x\napi:/x\n')
+  })
+
+  it('drops every duplicate of the same identity, so the target is really un-saved', () => {
+    // a hand-edited list can hold one target twice; one "saved" badge, one Remove
+    expect(removeTargetLine('/x\nGET /x\n/y\nget /x\n', '/x')).toEqual({
+      text: '/y\n',
+      removed: true,
+      invalid: false,
+    })
+  })
+
+  it('is a no-op (removed: false, text unchanged) when the line is not saved', () => {
+    const existing = '/\n/login\n'
+    expect(removeTargetLine(existing, '/missing')).toEqual({
+      text: existing,
+      removed: false,
+      invalid: false,
+    })
+  })
+
+  it('flags an invalid line and removes nothing', () => {
+    const existing = '/\n/login\n'
+    expect(removeTargetLine(existing, 'http://absolute.example/x')).toEqual({
+      text: existing,
+      removed: false,
+      invalid: true,
+    })
+    expect(removeTargetLine(existing, 'TRACE /login').invalid).toBe(true)
   })
 })

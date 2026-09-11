@@ -8,6 +8,7 @@ import type {
   AddTargetsResult,
   DiscoveryDetail,
   DiscoverySummary,
+  RemoveTargetResult,
   SitePublic,
 } from '#shared/types/api'
 
@@ -300,6 +301,64 @@ describe('DiscoveryPanel', () => {
     const manual = wrapper.find('[data-testid="manual-target-lines"]').element
     if (!(manual instanceof HTMLTextAreaElement)) throw new Error('expected a <textarea>')
     expect(manual.value).toBe('')
+  })
+
+  it('removes a saved row via DELETE and emits the updated site so the badge clears', async () => {
+    endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
+    endpoint('/api/discoveries/disc-1', () => detailFixture())
+    let deleted: unknown
+    const updated = siteFixture({ nucleiPaths: '/\n' })
+    endpoint('/api/sites/site-1/targets', {
+      method: 'DELETE',
+      handler: async (event) => {
+        deleted = await readBody(event)
+        const result: RemoveTargetResult = { site: updated, removed: true }
+        return result
+      },
+    })
+    const wrapper = await mountPanel()
+
+    // "/" and "/already-saved" are saved → two Remove buttons, none on the new row
+    const removes = wrapper.findAll('[data-testid="remove-target"]')
+    expect(removes).toHaveLength(2)
+    await removes[1]?.trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(deleted).toEqual({ line: '/already-saved' })
+    expect(wrapper.emitted('removed')?.[0]?.[0]).toEqual(updated)
+
+    // The host page hands the updated site back; the row is now selectable.
+    await wrapper.setProps({ site: updated })
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="remove-target"]')).toHaveLength(1)
+    const box = wrapper.findAll('[data-testid="discovered-url-checkbox"]')[2]?.element
+    if (!(box instanceof HTMLInputElement)) throw new Error('expected a checkbox input')
+    expect(box.disabled).toBe(false)
+    // the path is "/already-saved", so check for the badge, not the row text;
+    // this row carries no body shape, so no badge at all should remain
+    const thirdRow = wrapper.findAll('[data-testid="discovered-url"]')[2]
+    if (!thirdRow) throw new Error('expected three discovered rows')
+    expect(thirdRow.find('.badge').exists()).toBe(false)
+  })
+
+  it('shows the API error when removing a saved row is rejected', async () => {
+    endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
+    endpoint('/api/discoveries/disc-1', () => detailFixture())
+    endpoint('/api/sites/site-1/targets', {
+      method: 'DELETE',
+      handler: () => {
+        throw createError({ statusCode: 422, statusMessage: 'invalid target line' })
+      },
+    })
+    const wrapper = await mountPanel()
+
+    await wrapper.find('[data-testid="remove-target"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="remove-error"]').text()).toContain('invalid target line')
+    expect(wrapper.emitted('removed')).toBeUndefined()
   })
 
   it('starts a discovery and disables the button while it is running', async () => {

@@ -563,4 +563,23 @@ describe('SiteForm', () => {
     })
     expect(without.find('[data-testid="cancel"]').exists()).toBe(false)
   })
+
+  it('mirrors a new initial.nucleiPaths into Target paths (the discovery panel saves server-side)', async () => {
+    const wrapper = await mountSuspended(SiteForm, {
+      props: {
+        initial: { ...editSite, nucleiPaths: '/\n' },
+        submitting: false,
+        errorMessage: null,
+      },
+    })
+    const textarea = wrapper.find('[data-testid="nuclei-paths"]').element
+    if (!(textarea instanceof HTMLTextAreaElement)) throw new Error('expected a <textarea>')
+    expect(textarea.value).toBe('/\n')
+
+    await wrapper.setProps({ initial: { ...editSite, nucleiPaths: '/\n/login\n' } })
+    expect(textarea.value).toBe('/\n/login\n')
+    // and the synced value is what Save submits
+    await wrapper.find('[data-testid="site-form"]').trigger('submit')
+    expect(emittedUpdate(wrapper).nucleiPaths).toBe('/\n/login\n')
+  })
 })

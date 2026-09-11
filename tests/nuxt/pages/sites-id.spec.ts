@@ -69,4 +69,16 @@ describe('pages/sites/[id] — Start scan engine defaults', () => {
     expect(hint).toContain('base URL only')
     expect(hint).not.toMatch(/reached/i)
   })
+
+  it('shows the saved-target count and an Edit link, but no discovery/save UI (that lives in Edit)', async () => {
+    registerSite(siteFixture({ nucleiPaths: '/\n/login\n' }))
+    const wrapper = await mountSuspended(SiteDetailPage, { route: ROUTE })
+
+    expect(wrapper.find('[data-testid="saved-target-count"]').text()).toContain(
+      '2 saved target paths',
+    )
+    expect(wrapper.find('[data-testid="discovery-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="start-discovery"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="save-targets"]').exists()).toBe(false)
+  })
 })

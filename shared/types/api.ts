@@ -199,6 +199,12 @@ export interface AddTargetsResult {
   added: string[]
   skipped: string[]
 }
+/** Result of `DELETE /api/sites/:id/targets`: the site after the removal and
+ * whether a saved line actually matched (false = idempotent no-op). */
+export interface RemoveTargetResult {
+  site: SitePublic
+  removed: boolean
+}
 /** One running or queued job, across all sites. Returned by `GET /api/jobs`
  * in the job loop's claim order (running first, then queued scans oldest-first,
  * then queued discoveries oldest-first) — display order = execution order. */

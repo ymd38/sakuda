@@ -1,7 +1,7 @@
 # sakuda — single-container app. Host-side ports are read from .env
 # (see .env.example: SAKUDA_PORT / SAKUDA_BIND) so this stack can coexist with
-# other local stacks (internal-app on 3000/8080/5432, other-stack on
-# 3002/8082/3307, ...). Everything inside the container stays on 3000.
+# other local stacks that already use the usual 3000 / 8080 ports. Everything
+# inside the container stays on 3000.
 #
 #   make up          start sakuda
 #

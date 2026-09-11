@@ -6,7 +6,7 @@ import { discoveries, scans, sites } from '../db/schema'
 import type { SiteCipher } from '../domain/headerCipher'
 import { toSitePublic } from '../domain/siteView'
 import { parseNucleiPathLines, targetLineKey } from '#shared/utils/nucleiPaths'
-import { mergeTargetLines } from '#shared/utils/targetLines'
+import { mergeTargetLines, removeTargetLine } from '#shared/utils/targetLines'
 import type { Logger } from '../lib/logger'
 import { ServiceError } from './errors'
 import { latestScanSummary } from './scanService'
@@ -14,7 +14,13 @@ import type { BrowserStorageItem, BrowserStoragePatch } from '#shared/schemas/br
 import type { Header, HeaderPatch } from '#shared/schemas/headers'
 import type { TargetShape } from '#shared/schemas/targets'
 import { NUCLEI_PATHS_MAX_CHARS, type SiteInput, type SiteUpdateInput } from '#shared/schemas/site'
-import type { AddTargetsResult, RequestShape, SiteListItem, SitePublic } from '#shared/types/api'
+import type {
+  AddTargetsResult,
+  RemoveTargetResult,
+  RequestShape,
+  SiteListItem,
+  SitePublic,
+} from '#shared/types/api'
 
 export { toSitePublic, toSiteSnapshot } from '../domain/siteView'
 
@@ -164,12 +170,9 @@ export function updateSite(deps: SiteServiceDeps, id: string, input: SiteUpdateI
             browserStorage,
           ),
         )
-  // Saved shapes belong to saved target lines: dropping a line in Edit (the
-  // one place nucleiPaths is rewritten wholesale) must drop its shape too.
-  const savedKeys = new Set(parseNucleiPathLines(fields.nucleiPaths).lines.map(targetLineKey))
-  const requestShapes: Record<string, RequestShape> = {}
-  for (const [key, shape] of Object.entries(existing.requestShapes))
-    if (savedKeys.has(key)) requestShapes[key] = shape
+  // Saved shapes belong to saved target lines: dropping a line in Edit (where
+  // nucleiPaths is rewritten wholesale) must drop its shape too.
+  const requestShapes = pruneRequestShapes(existing.requestShapes, fields.nucleiPaths)
   deps.db
     .update(sites)
     .set({
@@ -250,6 +253,53 @@ export function addSiteTargets(
       .where(eq(sites.id, id))
       .run()
   return { site: getSiteOrThrow(deps.db, id), added: merged.added, skipped: merged.skipped }
+}
+
+/** Keeps only the shapes whose target line is still in `nucleiPaths` — a
+ * shape never outlives the line it was approved with. */
+function pruneRequestShapes(
+  shapes: Record<string, RequestShape>,
+  nucleiPaths: string,
+): Record<string, RequestShape> {
+  const savedKeys = new Set(parseNucleiPathLines(nucleiPaths).lines.map(targetLineKey))
+  const kept: Record<string, RequestShape> = {}
+  for (const [key, shape] of Object.entries(shapes)) if (savedKeys.has(key)) kept[key] = shape
+  return kept
+}
+
+/**
+ * Removes one saved target line — the counterpart of `addSiteTargets`, so
+ * the discovery review can un-save a line without a wholesale Edit. Identity
+ * is method + base + path; the rest of the text (comments, ordering) stays
+ * verbatim, and the line's request shape goes with it. Idempotent: a line
+ * that is not saved changes nothing and reports `removed: false`.
+ */
+export function removeSiteTarget(
+  deps: SiteServiceDeps,
+  id: string,
+  line: string,
+): RemoveTargetResult {
+  const existing = deps.db.select().from(sites).where(eq(sites.id, id)).get()
+  if (!existing) throw new ServiceError(404, 'SITE_NOT_FOUND', `site ${id} not found`)
+  const result = removeTargetLine(existing.nucleiPaths, line)
+  if (result.invalid)
+    throw new ServiceError(
+      422,
+      'VALIDATION',
+      `invalid target line: ${line} — must be "[METHOD] [api:]/path": a path starting with "/", optionally prefixed with an HTTP method (default GET) and/or "api:"`,
+      { invalid: [line] },
+    )
+  if (result.removed)
+    deps.db
+      .update(sites)
+      .set({
+        nucleiPaths: result.text,
+        requestShapes: pruneRequestShapes(existing.requestShapes, result.text),
+        updatedAt: deps.now().toISOString(),
+      })
+      .where(eq(sites.id, id))
+      .run()
+  return { site: getSiteOrThrow(deps.db, id), removed: result.removed }
 }
 
 /**

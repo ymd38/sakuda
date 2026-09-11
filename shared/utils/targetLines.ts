@@ -86,3 +86,37 @@ export function mergeTargetLines(existing: string, lines: string[]): MergeTarget
   const text = (trimmed === '' ? '' : trimmed + '\n') + added.join('\n') + '\n'
   return { text, added, skipped, invalid }
 }
+
+export interface RemoveTargetLineResult {
+  /** The new `nucleiPaths` text: every other line (comments, blanks, ordering) kept verbatim. */
+  text: string
+  /** False when no saved line matched — the removal is a no-op, `text` is `existing`. */
+  removed: boolean
+  /** True when `line` is not a valid target line; nothing is removed. */
+  invalid: boolean
+}
+
+/** Removes one saved target — every text line with that identity (method +
+ * base + path, see {@link targetLineKey}), so `/x`, `GET /x` and `get /x`
+ * all remove the same saved entry while `POST /x` is left alone. A hand-edited
+ * list can hold the same target twice; the review UI's "saved" badge is per
+ * identity, so un-saving must drop every duplicate or the badge would stay
+ * and the target would still be scanned. The rest of the text is kept
+ * verbatim — the counterpart of {@link mergeTargetLines}, which never touches
+ * existing content either. Idempotent: removing a line that is not saved
+ * returns the text unchanged with `removed: false`. */
+export function removeTargetLine(existing: string, line: string): RemoveTargetLineResult {
+  const parsed = parseNucleiPathLines(line)
+  const only = parsed.lines[0]
+  if (parsed.errors.length > 0 || parsed.lines.length !== 1 || !only)
+    return { text: existing, removed: false, invalid: true }
+  const key = targetLineKey(only)
+  let removed = false
+  const kept = existing.split(/\r?\n/).filter((raw) => {
+    const saved = parseNucleiPathLines(raw).lines[0]
+    if (!saved || targetLineKey(saved) !== key) return true
+    removed = true
+    return false
+  })
+  return { text: removed ? kept.join('\n') : existing, removed, invalid: false }
+}

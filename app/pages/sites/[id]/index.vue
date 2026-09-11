@@ -3,7 +3,6 @@ import ScanStatusBadge from '~/components/scan/ScanStatusBadge.vue'
 import SeverityStackChart from '~/components/chart/SeverityStackChart.vue'
 import EngineCountChart from '~/components/chart/EngineCountChart.vue'
 import DiffTrendChart from '~/components/chart/DiffTrendChart.vue'
-import DiscoveryPanel from '~/components/site/DiscoveryPanel.vue'
 import type { Engine, HistoryPoint, ScanSummary, SitePublic } from '#shared/types/api'
 import { parseNucleiPathLines } from '#shared/utils/nucleiPaths'
 import { isActiveScanEnabled } from '#shared/utils/activeScan'
@@ -32,12 +31,6 @@ const savedTargetCount = computed(() =>
   site.value ? parseNucleiPathLines(site.value.nucleiPaths).lines.length : 0,
 )
 const nucleiScansRootOnly = computed(() => !!site.value && savedTargetCount.value === 0)
-
-/** The discovery panel saves targets through its own endpoint and hands the
- * updated site back, so the page reflects the new count without a refetch. */
-function handleTargetsSaved(updated: SitePublic) {
-  site.value = updated
-}
 // dalfox sends attack payloads, so it can run only under active injection checks.
 const dalfoxAvailable = computed(() => !!site.value && isActiveScanEnabled(site.value))
 const zapApiAvailable = computed(
@@ -109,10 +102,9 @@ async function handleStartScan() {
           </p>
         </div>
         <p class="text-caption-sm text-mute">
-          Nuclei scans the saved target paths. Discover URLs with ZAP's spider, review them, and
-          save the ones you want scanned — you only need to discover again when the site changes.
+          One saved list, read by every engine. Discover URLs, review and save or remove them in
+          Edit — you only need to discover again when the site changes.
         </p>
-        <DiscoveryPanel :site="site" @saved="handleTargetsSaved" />
       </section>
 
       <section class="card mt-6 flex flex-col gap-4">
@@ -130,8 +122,8 @@ async function handleStartScan() {
               {{ ENGINE_LABELS.nuclei }}
             </label>
             <p v-if="nucleiScansRootOnly" class="text-caption-sm text-mute mt-1">
-              No target paths saved — nuclei scans the base URL only. Discover URLs below or add
-              paths in Edit to cover more pages/endpoints.
+              No target paths saved — nuclei scans the base URL only. Discover URLs or add paths in
+              Edit to cover more pages/endpoints.
             </p>
           </div>
 
