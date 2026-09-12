@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, type DOMWrapper } from '@vue/test-utils'
 import { createError, readBody } from 'h3'
 import DiscoveryPanel from '~/components/site/DiscoveryPanel.vue'
 import { buttonElement } from '../helpers/dom'
@@ -104,15 +104,76 @@ describe('DiscoveryPanel', () => {
     for (const u of unregisters.splice(0)) u()
   })
 
-  it('shows the empty state and an enabled Discover button when nothing was discovered yet', async () => {
+  it('before any discovery: enabled Discover button, and the saved lines already listed as "manual"', async () => {
     endpoint('/api/sites/site-1/discoveries', () => [])
-    const wrapper = await mountPanel()
+    const wrapper = await mountPanel() // nucleiPaths: '/\n/already-saved'
 
     expect(wrapper.text()).toContain('No discovery yet')
     expect(buttonElement(wrapper, '[data-testid="start-discovery"]').disabled).toBe(false)
-    expect(wrapper.find('[data-testid="discovered-urls"]').exists()).toBe(false)
+    // the saved list is always visible here, whatever the last crawl returned
+    const rows = wrapper.findAll('[data-testid="discovered-url"]')
+    expect(
+      rows.map((r: DOMWrapper<Element>) => r.find('[data-testid="discovered-url-source"]').text()),
+    ).toEqual(['manual', 'manual'])
+    expect(rows[1]?.text()).toContain('/already-saved')
+    expect(rows[1]?.find('[data-testid="remove-target"]').exists()).toBe(true)
+    // two areas: detected (no free text) and add (the only textarea)
+    expect(wrapper.find('[data-testid="targets-detected"] textarea').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="targets-add"] textarea').exists()).toBe(true)
     // nothing to save yet
     expect(buttonElement(wrapper, '[data-testid="save-targets"]').disabled).toBe(true)
+  })
+
+  it('shows the empty state when nothing is saved and nothing was discovered', async () => {
+    endpoint('/api/sites/site-1/discoveries', () => [])
+    const wrapper = await mountPanel(siteFixture({ nucleiPaths: '' }))
+    expect(wrapper.find('[data-testid="discovered-urls"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="no-targets"]').exists()).toBe(true)
+  })
+
+  it('keeps a hand-added line in the table after a discovery that did not return it', async () => {
+    endpoint('/api/sites/site-1/discoveries', () => [summaryFixture()])
+    endpoint('/api/discoveries/disc-1', () => detailFixture())
+    // '/by-hand' was saved from the Add paths area earlier; the crawl never returns it
+    const wrapper = await mountPanel(
+      siteFixture({ nucleiPaths: '/\n/already-saved\nPOST /by-hand\n' }),
+    )
+
+    const rows = wrapper.findAll('[data-testid="discovered-url"]')
+    expect(rows).toHaveLength(4)
+    const manual = rows[3]
+    if (!manual) throw new Error('expected a manual row')
+    expect(manual.find('[data-testid="discovered-url-method"]').text()).toBe('POST')
+    expect(manual.text()).toContain('/by-hand')
+    expect(manual.find('[data-testid="discovered-url-source"]').text()).toBe('manual')
+    expect(manual.text()).toContain('saved')
+    expect(manual.find('[data-testid="remove-target"]').exists()).toBe(true)
+    // it is saved, so it is not part of the selection
+    expect(wrapper.text()).toContain('1 selected')
+
+    // a new discovery (still without it) replaces the crawl rows, not the saved ones
+    endpoint('/api/sites/site-1/discoveries', {
+      method: 'POST',
+      handler: () => summaryFixture({ id: 'disc-2', status: 'queued', urlCount: 0 }),
+    })
+    endpoint('/api/discoveries/disc-2', () =>
+      detailFixture({
+        id: 'disc-2',
+        urls: [{ url: 'http://localhost:4001/', method: 'GET', statusCode: 200, source: 'spider' }],
+      }),
+    )
+    await wrapper.find('[data-testid="start-discovery"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+    const after = wrapper.findAll('[data-testid="discovered-url"]')
+    expect(
+      after.map((r: DOMWrapper<Element>) => r.find('[data-testid="discovered-url-source"]').text()),
+    ).toEqual(['spider', 'manual', 'manual'])
+    expect(after.map((r: DOMWrapper<Element>) => r.text())).toEqual([
+      expect.stringContaining('/'),
+      expect.stringContaining('/already-saved'),
+      expect.stringContaining('/by-hand'),
+    ])
   })
 
   it('warns that discovery submits forms only when active checks are on', async () => {

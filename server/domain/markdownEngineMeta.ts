@@ -103,8 +103,12 @@ function zapRows(meta: Record<string, unknown>, isFrontend: boolean): string[] {
   const zapVersion = metaString(meta, 'zapVersion')
   if (zapVersion) rows.push(`| ZAP version | ${text(zapVersion)} |`)
   if (isFrontend) {
-    const seedUrl = metaString(meta, 'seedUrl')
-    if (seedUrl) rows.push(`| Seed URL | ${code(seedUrl)} |`)
+    // `seedUrls` since the crawl starts became a list; `seedUrl` for scans
+    // recorded before that.
+    const seedUrls = metaStringArray(meta, 'seedUrls') ?? []
+    const legacySeedUrl = metaString(meta, 'seedUrl')
+    if (seedUrls.length > 0) rows.push(`| Seed URLs | ${seedUrls.map(code).join(', ')} |`)
+    else if (legacySeedUrl) rows.push(`| Seed URL | ${code(legacySeedUrl)} |`)
     const spider = metaString(meta, 'spider')
     if (spider) rows.push(`| Spider | ${text(spider)} |`)
     const spiderMaxMinutes = metaNumber(meta, 'spiderMaxMinutes')

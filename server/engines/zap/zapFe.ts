@@ -33,6 +33,7 @@ import {
   SITE_TREE_DUMP_SCRIPT_NAME,
 } from './siteTreeDump'
 import { isSeedAccessFailure, parseJobAccessFailures, seedPathReached } from './spiderReach'
+import { resolveDiscoverySeeds } from '#shared/utils/seedPaths'
 import { crawlScopePrefixes } from '#shared/utils/crawlScope'
 import {
   BROWSER_STORAGE_SCRIPT_ENGINE,
@@ -57,7 +58,13 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   const alias = env.zap.localhostAlias
   const originalHost = new URL(site.frontBaseUrl).hostname
   const base = rewriteLoopbackHost(site.frontBaseUrl + '/', alias).replace(/\/$/, '')
-  const seedUrl = joinUrl(base, site.zapFeSeedPath)
+  // The crawl starts are the site's step-4 list — the same seeds discovery
+  // uses (one Ajax spider run each); the first is where the traditional
+  // spider starts and what the session check looks for.
+  const seedPaths = resolveDiscoverySeeds(site)
+  const seedUrls = seedPaths.map((p) => joinUrl(base, p))
+  const seedPath = seedPaths[0] ?? site.zapFeSeedPath
+  const seedUrl = seedUrls[0] ?? joinUrl(base, seedPath)
   const excludeRegexes = zapExcludeRegexes(site.excludePaths)
   const hasBrowserStorage = site.browserStorage.length > 0
   // The single source of truth for "may this scan attack the target" —
@@ -112,7 +119,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   // plan must not change for sites that set no scope.
   const scopePrefixes = crawlScopePrefixes(site.crawlScopePaths)
   const scope = zapScopeContext({
-    seedUrls: [seedUrl],
+    seedUrls,
     front: base,
     api:
       scopePrefixes.length > 0 && site.apiBaseUrl
@@ -122,7 +129,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
   })
   const plan = buildZapFePlan({
     context: { name: 'sakuda', ...scope, excludePaths: excludeRegexes },
-    seedUrl,
+    seedUrls,
     ...(hasBrowserStorage
       ? {
           browserScript: {
@@ -159,7 +166,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     {
       scanId,
       engine: 'zap-fe',
-      seedUrl: joinUrl(site.frontBaseUrl, site.zapFeSeedPath),
+      seedUrls: seedPaths.map((p) => joinUrl(site.frontBaseUrl, p)),
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,
       activeScan,
       activeScanMaxMinutes,
@@ -238,15 +245,15 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     )
   if (seedFailure)
     warnings.push(
-      `spider could not reach the seed URL ${site.zapFeSeedPath} (${seedFailure.reason}) — verify the target is up and reachable from the ZAP container (host alias / network) before checking the site headers`,
+      `spider could not reach the seed URL ${seedPath} (${seedFailure.reason}) — verify the target is up and reachable from the ZAP container (host alias / network) before checking the site headers`,
     )
   else if (
     site.headers.length > 0 &&
     crawledUrls !== null &&
-    seedPathReached(site.zapFeSeedPath, crawledUrls) === false
+    seedPathReached(seedPath, crawledUrls) === false
   )
     warnings.push(
-      `seed path ${site.zapFeSeedPath} was not among the URLs the spider crawled — the session may not have been accepted; check the site headers`,
+      `seed path ${seedPath} was not among the URLs the spider crawled — the session may not have been accepted; check the site headers`,
     )
   if (n.authFailureCount > 0)
     warnings.push(`${n.authFailureCount} request(s) got 401/403 — headers may be expired`)
@@ -264,7 +271,7 @@ export const runZapFe: EngineRunner = async ({ scanId, site, workDir, env, logge
     signal: run.result.signal,
     meta: {
       zapVersion: n.zapVersion,
-      seedUrl: joinUrl(site.frontBaseUrl, site.zapFeSeedPath),
+      seedUrls: seedPaths.map((p) => joinUrl(site.frontBaseUrl, p)),
       spider: 'traditional + ajax',
       browserStorage: site.browserStorageNames.map((n) => `${n.kind}:${n.name}`),
       spiderMaxMinutes: site.zapFeSpiderMaxMinutes,

@@ -372,6 +372,8 @@ describe('SiteForm', () => {
     })
     await wrapper.find('[data-testid="name"]').setValue('Shop')
     await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:4001')
+    // the list is only editable once "From listed routes" is chosen
+    await wrapper.find('[data-testid="discovery-start-listed"]').trigger('change')
     await wrapper.find('[data-testid="discovery-seed-paths"]').setValue('/#/\n/#/basket')
     await wrapper.find('[data-testid="crawl-scope-paths"]').setValue('/rest\n/api')
 
@@ -508,16 +510,28 @@ describe('SiteForm', () => {
       props: { submitting: false, errorMessage: null },
     })
     const sections = wrapper.findAll('fieldset[data-testid^="section-"]')
+    // the order in which the scan targets are determined, numbered in the legends
     expect(sections.map((s) => s.attributes('data-testid'))).toEqual([
       'section-site',
+      'section-auth',
+      'section-active',
+      'section-crawl',
       'section-targets',
-      'section-discovery',
       'section-nuclei',
       'section-zap-fe',
       'section-zap-api',
-      'section-active',
-      'section-auth',
     ])
+    expect(sections.map((s) => s.find('legend [data-testid="section-step"]').text())).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '6',
+      '6',
+    ])
+    for (const s of sections) expect(s.find('[data-testid="section-note"]').exists()).toBe(true)
     const badgesOf = (testid: string) =>
       wrapper
         .find(`[data-testid="${testid}"]`)
@@ -529,26 +543,29 @@ describe('SiteForm', () => {
       expect(s.find('legend .text-heading-lg').exists()).toBe(true)
     }
     expect(badgesOf('section-site')).toEqual(['All engines'])
+    expect(badgesOf('section-auth')).toEqual(['All engines'])
+    expect(badgesOf('section-active')).toEqual(['Nuclei', 'ZAP frontend', 'ZAP API', 'Dalfox'])
+    expect(badgesOf('section-crawl')).toEqual(['Discovery'])
     expect(badgesOf('section-targets')).toEqual(['All engines'])
-    expect(badgesOf('section-discovery')).toEqual(['Discovery'])
     expect(badgesOf('section-nuclei')).toEqual(['Nuclei'])
     expect(badgesOf('section-zap-fe')).toEqual(['ZAP frontend'])
     expect(badgesOf('section-zap-api')).toEqual(['ZAP API'])
-    expect(badgesOf('section-active')).toEqual(['Nuclei', 'ZAP frontend', 'ZAP API', 'Dalfox'])
-    expect(badgesOf('section-auth')).toEqual(['All engines'])
 
     // each field sits in the section of the engine that reads it
     const within = (testid: string, field: string) =>
       wrapper.find(`[data-testid="${testid}"] [data-testid="${field}"]`).exists()
-    // the shared target list and the discovery-only fields sit outside any engine section
-    expect(within('section-targets', 'nuclei-paths')).toBe(true)
-    expect(within('section-discovery', 'discovery-seed-paths')).toBe(true)
-    expect(within('section-discovery', 'crawl-scope-paths')).toBe(true)
+    // each field sits in the step that determines it
     expect(within('section-site', 'exclude-paths')).toBe(true)
+    expect(within('section-auth', 'add-header')).toBe(true)
+    expect(within('section-auth', 'add-storage')).toBe(true)
+    expect(within('section-active', 'allow-mutating-requests')).toBe(true)
+    expect(within('section-crawl', 'zap-fe-seed-path')).toBe(true)
+    expect(within('section-crawl', 'discovery-seed-paths')).toBe(true)
+    expect(within('section-crawl', 'crawl-scope-paths')).toBe(true)
+    expect(within('section-targets', 'nuclei-paths')).toBe(true)
     expect(within('section-nuclei', 'nuclei-rate-limit')).toBe(true)
     expect(within('section-nuclei', 'risk-tag-fuzz')).toBe(true)
-    expect(within('section-zap-fe', 'zap-fe-seed-path')).toBe(true)
-    expect(within('section-zap-fe', 'add-storage')).toBe(true)
+    expect(within('section-zap-fe', 'zap-fe-spider-max-minutes')).toBe(true)
     expect(within('section-zap-api', 'openapi-json')).toBe(true)
     expect(within('section-zap-api', 'zap-api-max-minutes')).toBe(true)
     // the shared active-scan budget is reachable from the frontend section too
@@ -589,5 +606,108 @@ describe('SiteForm', () => {
     // and the synced value is what Save submits
     await wrapper.find('[data-testid="site-form"]').trigger('submit')
     expect(emittedUpdate(wrapper).nucleiPaths).toBe('/\n/login\n')
+  })
+
+  it('renders the Target paths textarea by default and replaces it with the `targets` slot when given', async () => {
+    const plain = await mountSuspended(SiteForm, {
+      props: { submitting: false, errorMessage: null },
+    })
+    expect(
+      plain.find('[data-testid="section-targets"] [data-testid="nuclei-paths"]').exists(),
+    ).toBe(true)
+
+    const slotted = await mountSuspended(SiteForm, {
+      props: {
+        initial: { ...editSite, nucleiPaths: '/\n' },
+        submitting: false,
+        errorMessage: null,
+      },
+      slots: { targets: '<div data-testid="slot-content">panel</div>' },
+    })
+    const section = slotted.find('[data-testid="section-targets"]')
+    expect(section.find('[data-testid="slot-content"]').exists()).toBe(true)
+    expect(section.find('[data-testid="nuclei-paths"]').exists()).toBe(false)
+    // the mirrored server value is what Save submits — untouched by the user here
+    await slotted.find('[data-testid="site-form"]').trigger('submit')
+    expect(emittedUpdate(slotted).nucleiPaths).toBe('/\n')
+  })
+
+  describe('crawl starts (seed path vs listed routes)', () => {
+    const radio = (wrapper: Awaited<ReturnType<typeof mountSuspended>>, id: string) =>
+      inputElement(wrapper, `[data-testid="discovery-start-${id}"]`)
+    const seedInput = (wrapper: Awaited<ReturnType<typeof mountSuspended>>) =>
+      inputElement(wrapper, '[data-testid="zap-fe-seed-path"]')
+    const listArea = (wrapper: Awaited<ReturnType<typeof mountSuspended>>) => {
+      const el = wrapper.find('[data-testid="discovery-seed-paths"]').element
+      if (!(el instanceof HTMLTextAreaElement)) throw new Error('expected a <textarea>')
+      return el
+    }
+    const mountWith = (initial: Partial<SitePublic>) =>
+      mountSuspended(SiteForm, {
+        props: { initial: { ...editSite, ...initial }, submitting: false, errorMessage: null },
+      })
+
+    it('picks the mode from the stored list: none or one line → seed path, two or more → listed', async () => {
+      const fresh = await mountSuspended(SiteForm, {
+        props: { submitting: false, errorMessage: null },
+      })
+      expect(radio(fresh, 'seed').checked).toBe(true)
+      expect(seedInput(fresh).disabled).toBe(false)
+      expect(listArea(fresh).disabled).toBe(true)
+
+      const one = await mountWith({ zapFeSeedPath: '/', discoverySeedPaths: '/#/' })
+      expect(radio(one, 'seed').checked).toBe(true)
+      expect(seedInput(one).value).toBe('/#/') // the single listed line is the start
+
+      const many = await mountWith({ discoverySeedPaths: '/#/\n/#/basket' })
+      expect(radio(many, 'listed').checked).toBe(true)
+      expect(seedInput(many).disabled).toBe(true)
+      expect(listArea(many).disabled).toBe(false)
+    })
+
+    it('listed routes: the list is saved and its first line becomes the seed path', async () => {
+      const wrapper = await mountSuspended(SiteForm, {
+        props: { submitting: false, errorMessage: null },
+      })
+      await wrapper.find('[data-testid="name"]').setValue('Shop')
+      await wrapper.find('[data-testid="front-base-url"]').setValue('http://localhost:4001')
+      await wrapper.find('[data-testid="discovery-start-listed"]').trigger('change')
+      // switching prefills an empty list with the seed path — nothing is lost
+      expect(listArea(wrapper).value).toBe('/')
+      await wrapper.find('[data-testid="discovery-seed-paths"]').setValue('/#/\n/#/basket')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      const payload = emittedSubmit(wrapper)
+      expect(payload.discoverySeedPaths).toBe('/#/\n/#/basket')
+      expect(payload.zapFeSeedPath).toBe('/#/')
+    })
+
+    it('seed path: the list is not saved, and switching back shows the first listed line', async () => {
+      const wrapper = await mountWith({ discoverySeedPaths: '/#/\n/#/basket' })
+      await wrapper.find('[data-testid="discovery-start-seed"]').trigger('change')
+      expect(seedInput(wrapper).value).toBe('/#/')
+      // the typed list stays in the (disabled) textarea — no reset on switch
+      expect(listArea(wrapper).value).toBe('/#/\n/#/basket')
+      await wrapper.find('[data-testid="site-form"]').trigger('submit')
+      const payload = emittedUpdate(wrapper)
+      expect(payload.zapFeSeedPath).toBe('/#/')
+      expect(payload.discoverySeedPaths).toBe('')
+    })
+
+    it('blocks submit with a message when the chosen start has nothing in it', async () => {
+      const wrapper = await mountSuspended(SiteForm, {
+        props: { submitting: false, errorMessage: null },
+      })
+      await wrapper.find('[data-testid="zap-fe-seed-path"]').setValue('')
+      expect(wrapper.find('[data-testid="discovery-start-error"]').exists()).toBe(true)
+      expect(buttonElement(wrapper, '[data-testid="submit"]').disabled).toBe(true)
+
+      await wrapper.find('[data-testid="discovery-start-listed"]').trigger('change')
+      // nothing to prefill from, so the list is empty and still blocked
+      expect(wrapper.find('[data-testid="discovery-start-error"]').exists()).toBe(true)
+      expect(buttonElement(wrapper, '[data-testid="submit"]').disabled).toBe(true)
+      await wrapper.find('[data-testid="discovery-seed-paths"]').setValue('/#/basket')
+      expect(wrapper.find('[data-testid="discovery-start-error"]').exists()).toBe(false)
+      expect(buttonElement(wrapper, '[data-testid="submit"]').disabled).toBe(false)
+    })
   })
 })

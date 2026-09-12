@@ -19,9 +19,11 @@ export function parseSeedPathLines(text: string): { lines: string[]; errors: str
   return { lines, errors }
 }
 
-/** The seeds a discovery crawls from: the configured list, or the zap-fe
- * seed path when none is configured — so an existing site keeps behaving
- * exactly as before this field existed. */
+/** The seeds a discovery crawls from — one of two, never both: the listed
+ * routes when any are configured ("From listed routes" in the form), else
+ * the zap-fe seed path ("From the seed path"). The choice is not stored;
+ * the list being empty or not is the choice, so an existing site keeps
+ * behaving exactly as before the field existed. */
 export function resolveDiscoverySeeds(site: {
   discoverySeedPaths: string
   zapFeSeedPath: string

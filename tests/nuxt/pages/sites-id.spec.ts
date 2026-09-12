@@ -121,7 +121,10 @@ describe('pages/sites/[id] — Start scan engine defaults', () => {
     )
     const wrapper = await mountSuspended(SiteDetailPage, { route: ROUTE })
 
-    const common = wrapper.findAll('[data-testid="common-targets"] li').map((li) => li.text())
+    // collapsed like the engine rows: a count in the summary, the lines inside
+    const details = wrapper.find('[data-testid="common-targets-details"]')
+    expect(details.find('summary').text()).toBe('3 saved lines')
+    const common = details.findAll('[data-testid="common-targets"] li').map((li) => li.text())
     expect(common).toEqual(['/', 'POST /rest/user/login', '/#/search?q='])
     expect(wrapper.find('[data-testid="excluded-target-count"]').text()).toContain('1 line dropped')
     const nuclei = wrapper.find('[data-testid="engine-targets-nuclei"]')

@@ -89,7 +89,7 @@ const zapFeRun: EngineRunView = {
   counts: { critical: 0, high: 0, medium: 0, low: 2, info: 1 },
   meta: {
     zapVersion: '2.15.0',
-    seedUrl: 'https://shop.example.com/',
+    seedUrls: ['https://shop.example.com/', 'https://shop.example.com/#/basket'],
     spider: 'traditional + ajax',
     spiderMaxMinutes: 5,
     reachedUrlCount: 3,
@@ -181,6 +181,10 @@ describe('buildScanMarkdown', () => {
     expect(md).toContain('| Front base URL | `https://shop.example.com` |')
     expect(md).toContain('| API base URL | `https://api.shop.example.com` |')
     expect(md).toContain('| Scan id | `scan-12345678` |')
+    // zap-fe meta: the crawl starts are a list (one Ajax spider run each)
+    expect(md).toContain(
+      '| Seed URLs | `https://shop.example.com/`, `https://shop.example.com/#/basket` |',
+    )
   })
 
   it('renders the summary table with a row per engine run plus a total row', () => {

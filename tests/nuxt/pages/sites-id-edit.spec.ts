@@ -36,13 +36,25 @@ describe('pages/sites/[id]/edit', () => {
     registerEndpoint(`/api/sites/${site.id}/discoveries`, () => [])
   })
 
-  it('hosts the Discover URLs panel above the form — targets are edited here', async () => {
+  it('starts with the Site section and hosts the discovery panel inside Targets — no separate card, no Target paths textarea', async () => {
     const wrapper = await mountSuspended(SiteEditPage, { route: `/sites/${site.id}/edit` })
-    const section = wrapper.find('[data-testid="targets-section"]')
-    expect(section.exists()).toBe(true)
-    expect(section.find('[data-testid="discovery-panel"]').exists()).toBe(true)
-    expect(section.find('[data-testid="start-discovery"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="nuclei-paths"]').exists()).toBe(true)
+    // nothing above the form: Site is the first thing after the heading
+    expect(wrapper.find('[data-testid="targets-section"]').exists()).toBe(false)
+    const order = wrapper
+      .findAll('fieldset[data-testid^="section-"]')
+      .map((s) => s.attributes('data-testid'))
+    expect(order[0]).toBe('section-site')
+    // Targets comes after everything discovery depends on (auth, active checks, crawl)
+    expect(order.indexOf('section-targets')).toBeGreaterThan(order.indexOf('section-crawl'))
+    expect(order.indexOf('section-crawl')).toBeGreaterThan(order.indexOf('section-active'))
+    expect(order.indexOf('section-active')).toBeGreaterThan(order.indexOf('section-auth'))
+    const targets = wrapper.find('[data-testid="section-targets"]')
+    expect(targets.find('[data-testid="discovery-panel"]').exists()).toBe(true)
+    expect(targets.find('[data-testid="targets-detected"]').exists()).toBe(true)
+    expect(targets.find('[data-testid="targets-add"]').exists()).toBe(true)
+    expect(targets.find('[data-testid="start-discovery"]').exists()).toBe(true)
+    // the panel is the only editor of the saved list on this page
+    expect(wrapper.find('[data-testid="nuclei-paths"]').exists()).toBe(false)
   })
 
   it('offers a Cancel link back to the site page, beside Save', async () => {

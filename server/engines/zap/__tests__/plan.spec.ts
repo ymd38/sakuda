@@ -11,7 +11,7 @@ describe('buildZapFePlan', () => {
         includePaths: ['^http://h:3000(/.*)?$'],
         excludePaths: ['^https?://[^/]+/auth/logout(\\?.*)?$'],
       },
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,
@@ -72,7 +72,7 @@ describe('buildZapFePlan', () => {
   it('inserts an activeScan job between the Ajax spider and passiveScan-wait when active checks are on', () => {
     const base = {
       context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,
@@ -117,7 +117,7 @@ describe('buildZapFePlan', () => {
   it('gates spider form submission (postForm) on active checks', () => {
     const base = {
       context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,
@@ -139,7 +139,7 @@ describe('buildZapFePlan', () => {
   it('requests the saved targets (GET) after the Ajax spider and before the active scan', () => {
     const base = {
       context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,
@@ -190,7 +190,7 @@ describe('buildZapFePlan', () => {
   it('runs the site-tree dump script (add + run) right after the spiders, before the requestor', () => {
     const base = {
       context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,
@@ -252,7 +252,7 @@ describe('buildZapFePlan', () => {
   it('adds the DOM XSS probe script (add + run) after the active scan when domXssProbe is set', () => {
     const base = {
       context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,
@@ -407,6 +407,30 @@ describe('buildZapApiPlan', () => {
     expect(jobs.findIndex((j) => j.type === 'activeScan')).toBeGreaterThan(
       jobs.map((j) => j.type).lastIndexOf('openapi'),
     )
+  })
+  it('frontend plan with several crawl starts: traditional spider from the first, one Ajax spider per seed', () => {
+    const plan = buildZapFePlan({
+      context: {
+        name: 'sakuda',
+        urls: ['http://h:3000/'],
+        includePaths: ['^http://h:3000(/.*)?$'],
+        excludePaths: [],
+      },
+      seedUrls: ['http://h:3000/#/', 'http://h:3000/#/basket'],
+      spiderMaxMinutes: 5,
+      ajaxMaxMinutes: 5,
+      passiveMaxMinutes: 5,
+      reportDir: '/zap/wrk/',
+    })
+    const jobs = (plan as { jobs: Array<{ type: string; parameters: Record<string, unknown> }> })
+      .jobs
+    expect(jobs.filter((j) => j.type === 'spider').map((j) => j.parameters.url)).toEqual([
+      'http://h:3000/#/',
+    ])
+    expect(jobs.filter((j) => j.type === 'spiderAjax').map((j) => j.parameters.url)).toEqual([
+      'http://h:3000/#/',
+      'http://h:3000/#/basket',
+    ])
   })
 })
 
@@ -602,7 +626,7 @@ describe('browser-storage script jobs and multiple discovery seeds', () => {
   it('zap-fe: includes the selenium jobs only when a browser script is given', () => {
     const base = {
       context,
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,
@@ -617,7 +641,7 @@ describe('planToYaml', () => {
   it('round-trips a plan through YAML.stringify/YAML.parse', () => {
     const plan = buildZapFePlan({
       context: { name: 'sakuda', urls: ['http://h:3000/'], includePaths: [], excludePaths: [] },
-      seedUrl: 'http://h:3000/',
+      seedUrls: ['http://h:3000/'],
       spiderMaxMinutes: 5,
       ajaxMaxMinutes: 5,
       passiveMaxMinutes: 5,

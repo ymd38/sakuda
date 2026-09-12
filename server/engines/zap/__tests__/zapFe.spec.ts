@@ -75,7 +75,7 @@ describe('runZapFe', () => {
 
     expect(out.counts.high).toBe(2)
     expect(out.meta.zapVersion).toBe('2.17.0')
-    expect(out.meta.seedUrl).toBe('http://localhost:3000/')
+    expect(out.meta.seedUrls).toEqual(['http://localhost:3000/'])
     expect(out.meta.spider).toBe('traditional + ajax')
     // the budget the runner enforced is recorded for the page (#84)
     expect(out.meta.timeBudget).toMatchObject({ totalMinutes: expect.any(Number) })

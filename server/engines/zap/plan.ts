@@ -18,7 +18,10 @@ export interface ZapBrowserScript {
 
 export interface ZapFePlanInput {
   context: ZapContext
-  seedUrl: string
+  /** The crawl starts the site configures (step 4, Crawl — the same list
+   * discovery uses): the traditional spider starts from the first, the Ajax
+   * spider runs once per seed. Never empty. */
+  seedUrls: string[]
   browserScript?: ZapBrowserScript
   spiderMaxMinutes: number
   ajaxMaxMinutes: number
@@ -241,7 +244,7 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
         type: 'spider',
         parameters: {
           context: i.context.name,
-          url: i.seedUrl,
+          url: i.seedUrls[0],
           maxDuration: i.spiderMaxMinutes,
           // ZAP's AF spider defaults postForm/processForm to true — i.e. it
           // submits forms as POST by default. That is a mutating action, so
@@ -251,7 +254,7 @@ export function buildZapFePlan(i: ZapFePlanInput): Record<string, unknown> {
           postForm: Boolean(i.activeScan),
         },
       },
-      ajaxSpiderJob(i.context.name, i.seedUrl, i.ajaxMaxMinutes),
+      ...i.seedUrls.map((url) => ajaxSpiderJob(i.context.name, url, i.ajaxMaxMinutes)),
       ...(i.siteTreeDump ? standaloneScriptJobs(i.siteTreeDump) : []),
       ...(i.requestTargets?.length ? [requestorJob(i.requestTargets)] : []),
       ...(i.activeScan

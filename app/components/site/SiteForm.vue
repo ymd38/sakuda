@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import type { BrowserStorageKind, BrowserStoragePatch } from '#shared/schemas/browserStorage'
 import { BROWSER_STORAGE_KINDS } from '#shared/schemas/browserStorage'
 import type { HeaderPatch } from '#shared/schemas/headers'
 import type { SiteUpdateInput } from '#shared/schemas/site'
 import type { RiskTag, SitePublic } from '#shared/types/api'
+import { parseSeedPathLines } from '#shared/utils/seedPaths'
 
 const props = defineProps<{
   initial?: SitePublic
@@ -51,11 +52,12 @@ const form = reactive({
   nucleiEnabledRiskTags: [...(props.initial?.nucleiEnabledRiskTags ?? [])] as RiskTag[],
 })
 
-// Target paths is the one field with a second writer: the discovery panel on
-// the Edit page saves/removes lines server-side and hands back the updated
-// site. Mirror that here, or "Save changes" would PUT the stale text and undo
-// it. The server value wins over an unsaved edit of this field — the panel's
-// result is committed state; the textarea's is not.
+// Target paths has a second writer on the Edit page: the discovery panel in
+// the `targets` slot saves/removes lines server-side and hands back the
+// updated site. Mirror that here so "Save changes" PUTs the current list, not
+// a stale one. On the Edit page there is no textarea for this field, so
+// nothing of the user's is overwritten; the create form (no slot) never sees
+// `initial` change.
 watch(
   () => props.initial?.nucleiPaths,
   (next) => {
@@ -187,8 +189,41 @@ function toStoragePatch(row: StorageRow): BrowserStoragePatch | null {
   return isNewRow ? null : { kind: row.kind, name: row.name }
 }
 
+// Where crawling starts — for "Discover URLs" and for the ZAP frontend scan's
+// spiders alike (both read resolveDiscoverySeeds) — is a choice, not a merge:
+// one seed path (the site's entry point), or routes listed by hand, one crawl
+// each. Nothing new is stored: "seed" saves the path in zapFeSeedPath with an
+// empty list; "listed" saves the list, and its first line in zapFeSeedPath,
+// which is what the session check looks for. On load, two or more listed
+// lines mean "listed"; one or none means "seed". Switching keeps what was
+// typed: seed → listed prefills an empty list with the seed path, listed →
+// seed shows the first listed line.
+type DiscoveryStart = 'seed' | 'listed'
+const initialLines = parseSeedPathLines(form.discoverySeedPaths).lines
+const discoveryStart = ref<DiscoveryStart>(initialLines.length >= 2 ? 'listed' : 'seed')
+if (initialLines.length === 1 && initialLines[0]) form.zapFeSeedPath = initialLines[0]
+const listedLines = computed(() => parseSeedPathLines(form.discoverySeedPaths).lines)
+function setDiscoveryStart(mode: DiscoveryStart) {
+  discoveryStart.value = mode
+  if (mode === 'listed' && listedLines.value.length === 0 && form.zapFeSeedPath.trim() !== '')
+    form.discoverySeedPaths = form.zapFeSeedPath.trim()
+  if (mode === 'seed' && listedLines.value[0]) form.zapFeSeedPath = listedLines.value[0]
+}
+/** "From listed routes" with nothing listed would silently fall back to the
+ * seed path on the server — refuse to submit instead of saving a lie. */
+const listedRoutesMissing = computed(
+  () => discoveryStart.value === 'listed' && listedLines.value.length === 0,
+)
+const seedPathMissing = computed(
+  () => discoveryStart.value === 'seed' && form.zapFeSeedPath.trim() === '',
+)
+
 const canSubmit = computed(
-  () => !props.submitting && (!requiresConfirmation.value || form.nonLocalConfirmed),
+  () =>
+    !props.submitting &&
+    (!requiresConfirmation.value || form.nonLocalConfirmed) &&
+    !listedRoutesMissing.value &&
+    !seedPathMissing.value,
 )
 
 // `v-model.number` leaves the bound field as the raw string when the input
@@ -207,8 +242,12 @@ function buildPayload(): SiteUpdateInput {
     nucleiPaths: form.nucleiPaths,
     openapiUrl: emptyToNull(form.openapiUrl),
     openapiJson: emptyToNull(form.openapiJson),
-    zapFeSeedPath: form.zapFeSeedPath,
-    discoverySeedPaths: form.discoverySeedPaths,
+    // One choice, two stored fields (see discoveryStart above).
+    zapFeSeedPath:
+      discoveryStart.value === 'listed'
+        ? (listedLines.value[0] ?? form.zapFeSeedPath)
+        : form.zapFeSeedPath,
+    discoverySeedPaths: discoveryStart.value === 'listed' ? form.discoverySeedPaths : '',
     crawlScopePaths: form.crawlScopePaths,
     excludePaths: form.excludePaths,
     nucleiRateLimit: toFiniteNumber(form.nucleiRateLimit, 50),
@@ -236,20 +275,25 @@ function handleSubmit() {
     <div class="card flex flex-col gap-1 text-caption-sm text-mute" data-testid="form-legend">
       <p><span class="text-sale">*</span> = required. Everything else can stay empty.</p>
       <p>
-        Fields are grouped by who reads them. <strong>Site</strong> and
-        <strong>Targets</strong> feed every engine · <strong>Discovery</strong> only steers
-        "Discover URLs" · <strong>ZAP frontend</strong> runs with just the site section ·
-        <strong>Nuclei</strong> scans the base URL plus the targets · <strong>ZAP API</strong> needs
-        an OpenAPI URL or JSON · <strong>Dalfox</strong> needs active checks.
+        Sections follow the order in which the scan targets are determined — set them top to bottom:
+        <strong>1 Site</strong> → <strong>2 Authentication</strong> →
+        <strong>3 Active checks</strong> → <strong>4 Crawl</strong> → <strong>5 Targets</strong> →
+        <strong>6 Engines</strong>. Each engine then derives its own targets from step 5 (shown on
+        the site page). <strong>Dalfox</strong> has no settings of its own; it needs active checks.
       </p>
     </div>
 
-    <!-- Site: what every engine needs -->
+    <!-- 1. Site: what every engine needs -->
     <fieldset data-testid="section-site" class="card border-hairline flex flex-col gap-6">
       <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">1</span>
         <span class="font-display text-heading-lg uppercase">Site</span>
         <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.all }}</span>
       </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        Set first: every path below is relative to these URLs, and Exclude paths applies to the
+        crawl and to every engine.
+      </p>
 
       <div class="flex flex-col gap-2">
         <label for="site-name" class="text-caption-md font-medium text-ink"
@@ -335,217 +379,76 @@ function handleSubmit() {
       </div>
     </fieldset>
 
-    <!-- Targets: the one saved list every engine reads -->
-    <fieldset data-testid="section-targets" class="card border-hairline flex flex-col gap-6">
+    <!-- 2. Authentication: the session the crawl and every engine use -->
+    <fieldset data-testid="section-auth" class="card border-hairline flex flex-col gap-6">
       <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
-        <span class="font-display text-heading-lg uppercase">Targets</span>
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">2</span>
+        <span class="font-display text-heading-lg uppercase">Authentication</span>
         <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.all }}</span>
       </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        Set before discovering: without a session the crawl only sees the anonymous pages, and so
+        will every engine.
+      </p>
 
-      <div class="flex flex-col gap-2">
-        <label for="site-nuclei-paths" class="text-caption-md font-medium text-ink"
-          >Target paths
-          <span class="text-mute">(optional — empty scans the base URL only)</span></label
-        >
-        <textarea
-          id="site-nuclei-paths"
-          v-model="form.nucleiPaths"
-          data-testid="nuclei-paths"
-          rows="4"
-          placeholder="/&#10;/api/products&#10;/rest/products/search?q=a&#10;api:/health"
-          class="textarea-soft"
-        />
+      <div class="flex flex-col gap-3">
+        <span class="text-caption-md font-medium text-ink">Headers</span>
         <p class="text-caption-sm text-mute">
-          The one saved list every engine reads — Nuclei scans it, the ZAP frontend requests it
-          before its spiders run (and DOM-probes hash routes), ZAP API builds a request document
-          from its non-GET lines, dalfox tests its GET lines. One path per line, relative to the
-          front base URL; prefix "api:" only for paths on the API base URL. Use "Discover URLs"
-          above to fill it from ZAP's spiders and katana, or hand-list the pages and endpoints you
-          care about (top page, login, API routes with query params). A line may start with an HTTP
-          method, e.g. "POST /api/x" — method omitted means GET; non-GET lines are replayed only
-          under active checks. "#" starts a comment.
+          Sent with every request by every engine (e.g. "Authorization: Bearer …", "Cookie: …").
+          Stored encrypted, never shown again.
         </p>
-      </div>
-    </fieldset>
 
-    <!-- Discovery: where "Discover URLs" starts and how far it may crawl — no engine reads these -->
-    <fieldset data-testid="section-discovery" class="card border-hairline flex flex-col gap-6">
-      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
-        <span class="font-display text-heading-lg uppercase">Discovery</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.discovery }}</span>
-      </legend>
-
-      <div class="flex flex-col gap-2">
-        <label for="site-discovery-seed-paths" class="text-caption-md font-medium text-ink"
-          >Discovery seed paths
-          <span class="text-mute">(optional — empty uses the ZAP frontend seed path)</span></label
-        >
-        <textarea
-          id="site-discovery-seed-paths"
-          v-model="form.discoverySeedPaths"
-          data-testid="discovery-seed-paths"
-          rows="3"
-          placeholder="/#/&#10;/#/search?q=apple&#10;/#/basket&#10;/profile"
-          class="textarea-soft"
-        />
-        <p class="text-caption-sm text-mute">
-          Where "Discover URLs" (ZAP's spiders and katana, crawl-only) starts, one path per line;
-          each gets its own Ajax spider run. List the pages of your app (hash routes are fine) so
-          the APIs behind them are found and can be saved as target paths. Discovery only — no scan
-          engine reads this.
+        <p v-if="isEditMode" class="text-caption-sm text-mute">
+          Leave a value empty to keep the stored one; type a new value to replace it. Remove a row
+          to delete that header. Renaming a stored header requires its value.
         </p>
-      </div>
 
-      <div class="flex flex-col gap-2">
-        <label for="site-crawl-scope-paths" class="text-caption-md font-medium text-ink"
-          >Crawl scope paths
-          <span class="text-mute">(optional — empty crawls the whole origin)</span></label
-        >
-        <textarea
-          id="site-crawl-scope-paths"
-          v-model="form.crawlScopePaths"
-          data-testid="crawl-scope-paths"
-          rows="3"
-          placeholder="/app&#10;/rest"
-          class="textarea-soft"
-        />
-        <p class="text-caption-sm text-mute">
-          Seed paths are where a crawl starts; this is how far it may go. One path prefix per line:
-          "Discover URLs" (ZAP's spiders and katana) and the ZAP frontend scan's spider then only
-          follow URLs under these prefixes (plus the API base URL and the seed pages themselves). An
-          API outside the prefixes, e.g. "/api/…", is not included on its own — add it as a line or
-          set it as the API base URL.
-        </p>
-      </div>
-    </fieldset>
-
-    <!-- Nuclei: signature/DAST checks against a fixed target list -->
-    <fieldset data-testid="section-nuclei" class="card border-hairline flex flex-col gap-6">
-      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
-        <span class="font-display text-heading-lg uppercase">Nuclei</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.nuclei }}</span>
-      </legend>
-
-      <div class="flex flex-col gap-2 sm:max-w-80">
-        <label for="site-nuclei-rate-limit" class="text-caption-md font-medium text-ink"
-          >Rate limit (requests/s)</label
-        >
-        <input
-          id="site-nuclei-rate-limit"
-          v-model.number="form.nucleiRateLimit"
-          data-testid="nuclei-rate-limit"
-          type="number"
-          required
-          min="1"
-          max="1000"
-          class="input-pill"
-        />
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <span class="text-caption-md font-medium text-ink">Extra risk template groups</span>
-        <p class="text-caption-sm text-mute">
-          Normally excluded even in active mode. Each needs Active injection checks (below) on to
-          take effect.
-        </p>
-        <label
-          v-for="group in RISK_TAG_GROUPS"
-          :key="group.tag"
-          class="flex items-start gap-3"
-          :class="{ 'opacity-50': !form.allowMutatingRequests }"
-        >
-          <input
-            v-model="form.nucleiEnabledRiskTags"
-            :value="group.tag"
-            :data-testid="`risk-tag-${group.tag}`"
-            type="checkbox"
-            :disabled="!form.allowMutatingRequests"
-            class="mt-1"
-          />
-          <span class="text-caption-sm">
-            <span class="font-medium text-ink">{{ group.label }}</span>
-            <span class="text-mute"> — {{ group.help }}</span>
-          </span>
-        </label>
-      </div>
-    </fieldset>
-
-    <!-- ZAP frontend: crawl from a seed in a real browser -->
-    <fieldset data-testid="section-zap-fe" class="card border-hairline flex flex-col gap-6">
-      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
-        <span class="font-display text-heading-lg uppercase">ZAP frontend</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapFe }}</span>
-      </legend>
-
-      <div class="flex flex-col gap-2">
-        <label for="site-zap-fe-seed-path" class="text-caption-md font-medium text-ink"
-          >Seed path <span class="text-sale">*</span></label
-        >
-        <input
-          id="site-zap-fe-seed-path"
-          v-model="form.zapFeSeedPath"
-          data-testid="zap-fe-seed-path"
-          type="text"
-          placeholder="/"
-          required
-          class="input-pill"
-        />
-        <p class="text-caption-sm text-mute">
-          Where the ZAP spider starts crawling, relative to the front base URL. "/" is fine for most
-          sites; SPAs with hash routing use e.g. "/#/". With auth headers, point it at a page only a
-          logged-in user can reach (e.g. "/dashboard") so sakuda can warn when the session was not
-          accepted.
-        </p>
-      </div>
-
-      <div class="flex flex-col gap-2 sm:max-w-80">
-        <label for="site-zap-fe-spider-max-minutes" class="text-caption-md font-medium text-ink"
-          >Spider max minutes</label
-        >
-        <input
-          id="site-zap-fe-spider-max-minutes"
-          v-model.number="form.zapFeSpiderMaxMinutes"
-          data-testid="zap-fe-spider-max-minutes"
-          type="number"
-          required
-          min="1"
-          max="120"
-          class="input-pill"
-        />
-        <p class="text-caption-sm text-mute">
-          Applies to the traditional spider and the Ajax spider each.
-        </p>
-      </div>
-
-      <!-- The same site field as the ZAP API section's box: one active-scan
-           budget, shown wherever an engine spends it. -->
-      <div class="flex flex-col gap-2 sm:max-w-80">
-        <label
-          for="site-zap-fe-active-scan-max-minutes"
-          class="text-caption-md font-medium text-ink"
-          >Active scan max minutes</label
-        >
-        <input
-          id="site-zap-fe-active-scan-max-minutes"
-          v-model.number="form.zapApiMaxMinutes"
-          data-testid="zap-fe-active-scan-max-minutes"
-          type="number"
-          required
-          min="1"
-          max="600"
-          class="input-pill"
-        />
-        <p class="text-caption-sm text-mute">
-          Caps the frontend active scan, which runs only when Active injection checks (below) is on.
-          Shared with the ZAP API section — editing it here changes it there too.
-        </p>
+        <div data-testid="headers-editor" class="flex flex-col gap-3">
+          <div
+            v-for="(row, index) in headerRows"
+            :key="index"
+            class="flex flex-col gap-2 sm:flex-row sm:items-center"
+          >
+            <input
+              v-model="row.name"
+              :data-testid="`header-name-${index}`"
+              type="text"
+              placeholder="Header name"
+              class="input-pill"
+            />
+            <input
+              v-model="row.value"
+              :data-testid="`header-value-${index}`"
+              type="password"
+              autocomplete="off"
+              :placeholder="isStoredHeader(row) ? 'unchanged' : 'Header value'"
+              class="input-pill"
+            />
+            <button
+              type="button"
+              :data-testid="`remove-header-${index}`"
+              class="btn-secondary"
+              @click="removeHeaderRow(index)"
+            >
+              Remove
+            </button>
+          </div>
+          <button
+            type="button"
+            data-testid="add-header"
+            class="btn-secondary self-start"
+            @click="addHeaderRow"
+          >
+            Add header
+          </button>
+        </div>
       </div>
 
       <div class="flex flex-col gap-3">
         <span class="text-caption-md font-medium text-ink">Browser storage</span>
         <p class="text-caption-sm text-mute">
           Values seeded into ZAP's browser (localStorage / sessionStorage / cookie) before the Ajax
-          spider crawls, so a single-page app renders as logged in. Headers (below) authenticate
+          spider crawls, so a single-page app renders as logged in. Headers (above) authenticate
           requests; this authenticates the UI. Stored encrypted, never shown again.
         </p>
 
@@ -601,12 +504,325 @@ function handleSubmit() {
       </div>
     </fieldset>
 
-    <!-- ZAP API: active scan driven by an OpenAPI document -->
+    <!-- 3. Active checks: the one opt-in discovery and every active engine mode read -->
+    <fieldset data-testid="section-active" class="card border-hairline flex flex-col gap-6">
+      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">3</span>
+        <span class="font-display text-heading-lg uppercase">Active checks</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.nuclei }}</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapFe }}</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapApi }}</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.dalfox }}</span>
+      </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        Decide before discovering: it changes what the crawl does (form submission) and which saved
+        lines the engines replay.
+      </p>
+
+      <div class="flex flex-col gap-2">
+        <div class="flex items-start gap-3">
+          <input
+            id="site-allow-mutating-requests"
+            v-model="form.allowMutatingRequests"
+            data-testid="allow-mutating-requests"
+            type="checkbox"
+            class="mt-1"
+          />
+          <label for="site-allow-mutating-requests" class="text-caption-md font-medium text-ink">
+            Active injection checks (sends attack payloads; may modify data)
+          </label>
+        </div>
+        <p class="text-caption-sm text-mute">
+          Off (default): passive and signature checks only — nothing that changes state. On: Nuclei
+          runs its DAST templates (SQLi, LFI, SSTI, SSRF, …) against target paths that have query
+          parameters, e.g. "/search?q=", and ZAP frontend adds an active scan (reflected / DOM XSS)
+          over what its spider found. It also makes discovery active — the crawl submits forms
+          before you review the results. Only enable this for an environment you own and can reset;
+          it may corrupt or delete data.
+        </p>
+      </div>
+    </fieldset>
+
+    <!-- 4. Crawl: where "Discover URLs" (and the ZAP frontend spider) starts and how far it may go -->
+    <fieldset data-testid="section-crawl" class="card border-hairline flex flex-col gap-6">
+      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">4</span>
+        <span class="font-display text-heading-lg uppercase">Crawl</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.discovery }}</span>
+      </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        Where crawling starts and how far it may go — for "Discover URLs" (ZAP's spiders and katana)
+        and for the ZAP frontend scan's spiders alike. Run "Discover URLs" in Targets once these are
+        set.
+      </p>
+
+      <fieldset class="flex flex-col gap-4" data-testid="discovery-start">
+        <legend class="text-caption-md font-medium text-ink">
+          Crawl starts <span class="text-sale">*</span>
+        </legend>
+
+        <div class="flex flex-col gap-2">
+          <label class="text-body-md text-ink flex items-center gap-2">
+            <input
+              type="radio"
+              name="discovery-start"
+              value="seed"
+              data-testid="discovery-start-seed"
+              :checked="discoveryStart === 'seed'"
+              @change="setDiscoveryStart('seed')"
+            />
+            From the seed path
+            <span class="text-caption-sm text-mute">— the entry point; one crawl</span>
+          </label>
+          <input
+            id="site-zap-fe-seed-path"
+            v-model="form.zapFeSeedPath"
+            data-testid="zap-fe-seed-path"
+            type="text"
+            placeholder="/"
+            class="input-pill"
+            :disabled="discoveryStart !== 'seed'"
+          />
+          <p
+            v-if="seedPathMissing"
+            class="text-sale text-caption-sm"
+            data-testid="discovery-start-error"
+          >
+            Enter the path to start from, or choose "From listed routes".
+          </p>
+          <p class="text-caption-sm text-mute">
+            Relative to the front base URL. "/" is fine for most sites; SPAs with hash routing use
+            e.g. "/#/". With auth set, point it at a page only a logged-in user can reach (e.g.
+            "/dashboard") so sakuda can warn when the session was not accepted.
+          </p>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label class="text-body-md text-ink flex items-center gap-2">
+            <input
+              type="radio"
+              name="discovery-start"
+              value="listed"
+              data-testid="discovery-start-listed"
+              :checked="discoveryStart === 'listed'"
+              @change="setDiscoveryStart('listed')"
+            />
+            From listed routes
+            <span class="text-caption-sm text-mute">— one crawl per line</span>
+          </label>
+          <textarea
+            id="site-discovery-seed-paths"
+            v-model="form.discoverySeedPaths"
+            data-testid="discovery-seed-paths"
+            rows="3"
+            placeholder="/#/&#10;/#/search?q=apple&#10;/#/basket&#10;/profile"
+            class="textarea-soft"
+            :disabled="discoveryStart !== 'listed'"
+          />
+          <p
+            v-if="listedRoutesMissing"
+            class="text-sale text-caption-sm"
+            data-testid="discovery-start-error"
+          >
+            List at least one route, or choose "From the seed path".
+          </p>
+          <p class="text-caption-sm text-mute">
+            One path per line, each crawled on its own (ZAP's spiders and katana in discovery, the
+            ZAP frontend scan's spiders at scan time). List the pages of your app (hash routes are
+            fine) so the APIs behind them are found — a single-page app usually needs its routes
+            listed, since its root alone shows little. The first line is also where the traditional
+            spider starts and what the session check looks for.
+          </p>
+        </div>
+      </fieldset>
+
+      <div class="flex flex-col gap-2">
+        <label for="site-crawl-scope-paths" class="text-caption-md font-medium text-ink"
+          >Crawl scope paths
+          <span class="text-mute">(optional — empty crawls the whole origin)</span></label
+        >
+        <textarea
+          id="site-crawl-scope-paths"
+          v-model="form.crawlScopePaths"
+          data-testid="crawl-scope-paths"
+          rows="3"
+          placeholder="/app&#10;/rest"
+          class="textarea-soft"
+        />
+        <p class="text-caption-sm text-mute">
+          Seed paths are where a crawl starts; this is how far it may go. One path prefix per line:
+          "Discover URLs" (ZAP's spiders and katana) and the ZAP frontend scan's spider then only
+          follow URLs under these prefixes (plus the API base URL and the seed pages themselves). An
+          API outside the prefixes, e.g. "/api/…", is not included on its own — add it as a line or
+          set it as the API base URL.
+        </p>
+      </div>
+    </fieldset>
+
+    <!-- 5. Targets: the one saved list every engine reads -->
+    <fieldset data-testid="section-targets" class="card border-hairline flex flex-col gap-6">
+      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">5</span>
+        <span class="font-display text-heading-lg uppercase">Targets</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.all }}</span>
+      </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        The result of discovery plus your own lines: the one list every engine reads. What each
+        engine does with it is shown on the site page.
+      </p>
+
+      <!-- The Edit page fills this slot with the discovery panel (discovered & saved ∪ add
+           paths), which saves straight to the server; the fallback textarea is for a site that
+           does not exist yet (New site), where nothing can be discovered. -->
+      <slot name="targets">
+        <div class="flex flex-col gap-2">
+          <label for="site-nuclei-paths" class="text-caption-md font-medium text-ink"
+            >Target paths
+            <span class="text-mute">(optional — empty scans the base URL only)</span></label
+          >
+          <textarea
+            id="site-nuclei-paths"
+            v-model="form.nucleiPaths"
+            data-testid="nuclei-paths"
+            rows="4"
+            placeholder="/&#10;/api/products&#10;/rest/products/search?q=a&#10;api:/health"
+            class="textarea-soft"
+          />
+          <p class="text-caption-sm text-mute">
+            The one saved list every engine reads — Nuclei scans it, the ZAP frontend requests it
+            before its spiders run (and DOM-probes hash routes), ZAP API builds a request document
+            from its non-GET lines, dalfox tests its GET lines. One path per line, relative to the
+            front base URL; prefix "api:" only for paths on the API base URL. Once the site exists,
+            "Discover URLs" on its Edit page fills this list from ZAP's spiders and katana; or
+            hand-list the pages and endpoints you care about (top page, login, API routes with query
+            params). A line may start with an HTTP method, e.g. "POST /api/x" — method omitted means
+            GET; non-GET lines are replayed only under active checks. "#" starts a comment.
+          </p>
+        </div>
+      </slot>
+    </fieldset>
+
+    <!-- 6. Nuclei: signature/DAST checks against the saved targets -->
+    <fieldset data-testid="section-nuclei" class="card border-hairline flex flex-col gap-6">
+      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">6</span>
+        <span class="font-display text-heading-lg uppercase">Nuclei</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.nuclei }}</span>
+      </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        Engine limits only: its targets come from step 5.
+      </p>
+
+      <div class="flex flex-col gap-2 sm:max-w-80">
+        <label for="site-nuclei-rate-limit" class="text-caption-md font-medium text-ink"
+          >Rate limit (requests/s)</label
+        >
+        <input
+          id="site-nuclei-rate-limit"
+          v-model.number="form.nucleiRateLimit"
+          data-testid="nuclei-rate-limit"
+          type="number"
+          required
+          min="1"
+          max="1000"
+          class="input-pill"
+        />
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <span class="text-caption-md font-medium text-ink">Extra risk template groups</span>
+        <p class="text-caption-sm text-mute">
+          Normally excluded even in active mode. Each needs Active injection checks (below) on to
+          take effect.
+        </p>
+        <label
+          v-for="group in RISK_TAG_GROUPS"
+          :key="group.tag"
+          class="flex items-start gap-3"
+          :class="{ 'opacity-50': !form.allowMutatingRequests }"
+        >
+          <input
+            v-model="form.nucleiEnabledRiskTags"
+            :value="group.tag"
+            :data-testid="`risk-tag-${group.tag}`"
+            type="checkbox"
+            :disabled="!form.allowMutatingRequests"
+            class="mt-1"
+          />
+          <span class="text-caption-sm">
+            <span class="font-medium text-ink">{{ group.label }}</span>
+            <span class="text-mute"> — {{ group.help }}</span>
+          </span>
+        </label>
+      </div>
+    </fieldset>
+
+    <!-- 6. ZAP frontend: crawl from the seed in a real browser -->
+    <fieldset data-testid="section-zap-fe" class="card border-hairline flex flex-col gap-6">
+      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">6</span>
+        <span class="font-display text-heading-lg uppercase">ZAP frontend</span>
+        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapFe }}</span>
+      </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        Engine limits only: it spiders from the step 4 crawl starts and requests the step 5 targets.
+      </p>
+
+      <div class="flex flex-col gap-2 sm:max-w-80">
+        <label for="site-zap-fe-spider-max-minutes" class="text-caption-md font-medium text-ink"
+          >Spider max minutes</label
+        >
+        <input
+          id="site-zap-fe-spider-max-minutes"
+          v-model.number="form.zapFeSpiderMaxMinutes"
+          data-testid="zap-fe-spider-max-minutes"
+          type="number"
+          required
+          min="1"
+          max="120"
+          class="input-pill"
+        />
+        <p class="text-caption-sm text-mute">
+          Applies to the traditional spider and the Ajax spider each.
+        </p>
+      </div>
+
+      <!-- The same site field as the ZAP API section's box: one active-scan
+           budget, shown wherever an engine spends it. -->
+      <div class="flex flex-col gap-2 sm:max-w-80">
+        <label
+          for="site-zap-fe-active-scan-max-minutes"
+          class="text-caption-md font-medium text-ink"
+          >Active scan max minutes</label
+        >
+        <input
+          id="site-zap-fe-active-scan-max-minutes"
+          v-model.number="form.zapApiMaxMinutes"
+          data-testid="zap-fe-active-scan-max-minutes"
+          type="number"
+          required
+          min="1"
+          max="600"
+          class="input-pill"
+        />
+        <p class="text-caption-sm text-mute">
+          Caps the frontend active scan, which runs only when Active injection checks (below) is on.
+          Shared with the ZAP API section — editing it here changes it there too.
+        </p>
+      </div>
+    </fieldset>
+
+    <!-- 6. ZAP API: active scan driven by an OpenAPI document -->
     <fieldset data-testid="section-zap-api" class="card border-hairline flex flex-col gap-6">
       <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
+        <span data-testid="section-step" class="text-caption-md text-mute font-mono">6</span>
         <span class="font-display text-heading-lg uppercase">ZAP API</span>
         <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapApi }}</span>
       </legend>
+      <p class="text-caption-sm text-mute" data-testid="section-note">
+        Engine source and limits: an OpenAPI document, or a request document generated from the step
+        5 non-GET lines under active checks.
+      </p>
 
       <div class="flex flex-col gap-2">
         <label for="site-openapi-url" class="text-caption-md font-medium text-ink"
@@ -658,101 +874,6 @@ function handleSubmit() {
           Caps the API scan. Shared with the ZAP frontend section, whose active scan it caps too
           when Active injection checks (below) is on — editing it here changes it there.
         </p>
-      </div>
-    </fieldset>
-
-    <!-- Active checks: the one opt-in every active engine mode reads -->
-    <fieldset data-testid="section-active" class="card border-hairline flex flex-col gap-6">
-      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
-        <span class="font-display text-heading-lg uppercase">Active checks</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.nuclei }}</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapFe }}</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.zapApi }}</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.dalfox }}</span>
-      </legend>
-
-      <div class="flex flex-col gap-2">
-        <div class="flex items-start gap-3">
-          <input
-            id="site-allow-mutating-requests"
-            v-model="form.allowMutatingRequests"
-            data-testid="allow-mutating-requests"
-            type="checkbox"
-            class="mt-1"
-          />
-          <label for="site-allow-mutating-requests" class="text-caption-md font-medium text-ink">
-            Active injection checks (sends attack payloads; may modify data)
-          </label>
-        </div>
-        <p class="text-caption-sm text-mute">
-          Off (default): passive and signature checks only — nothing that changes state. On: Nuclei
-          runs its DAST templates (SQLi, LFI, SSTI, SSRF, …) against target paths that have query
-          parameters, e.g. "/search?q=", and ZAP frontend adds an active scan (reflected / DOM XSS)
-          over what its spider found. It also makes discovery active — the crawl submits forms
-          before you review the results. Only enable this for an environment you own and can reset;
-          it may corrupt or delete data.
-        </p>
-      </div>
-    </fieldset>
-
-    <!-- Authentication: request headers every engine sends -->
-    <fieldset data-testid="section-auth" class="card border-hairline flex flex-col gap-6">
-      <legend class="-ml-2 flex flex-wrap items-center gap-3 px-2">
-        <span class="font-display text-heading-lg uppercase">Authentication</span>
-        <span data-testid="engine-badge" class="badge">{{ ENGINE_BADGE.all }}</span>
-      </legend>
-
-      <div class="flex flex-col gap-3">
-        <span class="text-caption-md font-medium text-ink">Headers</span>
-        <p class="text-caption-sm text-mute">
-          Sent with every request by every engine (e.g. "Authorization: Bearer …", "Cookie: …").
-          Stored encrypted, never shown again.
-        </p>
-
-        <p v-if="isEditMode" class="text-caption-sm text-mute">
-          Leave a value empty to keep the stored one; type a new value to replace it. Remove a row
-          to delete that header. Renaming a stored header requires its value.
-        </p>
-
-        <div data-testid="headers-editor" class="flex flex-col gap-3">
-          <div
-            v-for="(row, index) in headerRows"
-            :key="index"
-            class="flex flex-col gap-2 sm:flex-row sm:items-center"
-          >
-            <input
-              v-model="row.name"
-              :data-testid="`header-name-${index}`"
-              type="text"
-              placeholder="Header name"
-              class="input-pill"
-            />
-            <input
-              v-model="row.value"
-              :data-testid="`header-value-${index}`"
-              type="password"
-              autocomplete="off"
-              :placeholder="isStoredHeader(row) ? 'unchanged' : 'Header value'"
-              class="input-pill"
-            />
-            <button
-              type="button"
-              :data-testid="`remove-header-${index}`"
-              class="btn-secondary"
-              @click="removeHeaderRow(index)"
-            >
-              Remove
-            </button>
-          </div>
-          <button
-            type="button"
-            data-testid="add-header"
-            class="btn-secondary self-start"
-            @click="addHeaderRow"
-          >
-            Add header
-          </button>
-        </div>
       </div>
     </fieldset>
 

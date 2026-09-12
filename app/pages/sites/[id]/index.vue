@@ -162,15 +162,18 @@ async function handleStartScan() {
             Nothing saved yet — nuclei falls back to the base URL root(s); the other engines work
             from their own crawl or OpenAPI document.
           </p>
-          <ul
-            v-else
-            class="flex flex-col gap-1 font-mono text-caption-md"
-            data-testid="common-targets"
-          >
-            <li v-for="t in targetSummary.common" :key="lineOf(t)" class="break-all">
-              {{ lineOf(t) }}
-            </li>
-          </ul>
+          <details v-else class="text-caption-md" data-testid="common-targets-details">
+            <summary class="cursor-pointer">
+              {{ targetSummary.common.length }} saved line{{
+                targetSummary.common.length === 1 ? '' : 's'
+              }}
+            </summary>
+            <ul class="mt-1 flex flex-col gap-1 font-mono" data-testid="common-targets">
+              <li v-for="t in targetSummary.common" :key="lineOf(t)" class="break-all">
+                {{ lineOf(t) }}
+              </li>
+            </ul>
+          </details>
           <p
             v-if="targetSummary.excludedCount > 0"
             class="text-caption-sm text-mute"
