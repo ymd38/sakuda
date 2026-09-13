@@ -16,6 +16,7 @@ import { countSkippedMethods, expandNucleiTargets } from '../../domain/nucleiTar
 import type { SeverityCounts } from '#shared/types/api'
 import { emptyCounts } from '#shared/utils/severity'
 import { withHeadersConfig } from '../headersConfig'
+import { writeSecretFile } from '../secretFile'
 import { runCommand, type CommandResult } from '../runCommand'
 import {
   EngineError,
@@ -365,8 +366,8 @@ async function runNucleiPhases(
       // and the outputs may echo them; write everything 0600 and pre-create
       // the tool-written outputs so nuclei does not create them under the
       // process umask. All four are removed in `finally`.
-      await writeFile(docFile, JSON.stringify(d.doc), { mode: 0o600 })
-      for (const p of [outputFile, stdoutPath, stderrPath]) await writeFile(p, '', { mode: 0o600 })
+      await writeSecretFile(docFile, JSON.stringify(d.doc))
+      for (const p of [outputFile, stdoutPath, stderrPath]) await writeSecretFile(p, '')
       const args = buildNucleiOpenapiArgs({
         openapiFile: docFile,
         dastTemplatesDir: env.nuclei.dastTemplatesDir,

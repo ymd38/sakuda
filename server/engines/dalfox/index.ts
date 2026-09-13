@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isActiveScanEnabled } from '../../domain/activeScan'
 import { engineTimeBudget, timeBudgetEnv } from '../../domain/engineTimeBudget'
@@ -7,6 +7,7 @@ import { expandNucleiTargets } from '../../domain/nucleiTargets'
 import { rewriteLoopbackHost } from '../../domain/hostAlias'
 import { emptyCounts } from '#shared/utils/severity'
 import { runCommand, SpawnError } from '../runCommand'
+import { writeSecretFile } from '../secretFile'
 import { EngineError, type EngineOutput, type EngineRunner } from '../types'
 import { buildDalfoxArgs } from './args'
 import { buildDalfoxConfig } from './config'
@@ -123,10 +124,9 @@ export const runDalfox: EngineRunner = async ({ scanId, site, workDir, env, logg
     // and the report may echo target query values; write both 0600 and
     // pre-create the tool-written output so dalfox does not create it under the
     // process umask.
-    await writeFile(
+    await writeSecretFile(
       targetsFile,
       getUrls.map((u) => rewriteLoopbackHost(u, alias)).join('\n') + '\n',
-      { mode: 0o600 },
     )
     const config = buildDalfoxConfig({
       headers: site.headers,
@@ -135,8 +135,8 @@ export const runDalfox: EngineRunner = async ({ scanId, site, workDir, env, logg
       maxTargets: env.dalfox.maxTargets,
       scanTimeoutSec,
     })
-    await writeFile(configFile, JSON.stringify(config), { mode: 0o600 })
-    await writeFile(outputFile, '', { mode: 0o600 })
+    await writeSecretFile(configFile, JSON.stringify(config))
+    await writeSecretFile(outputFile, '')
 
     let result
     try {

@@ -1,6 +1,6 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { rm } from 'node:fs/promises'
 import type { Header } from '#shared/schemas/headers'
+import { writeSecretFile } from './secretFile'
 
 /** The `-config` key a tool reads its header list from — goflags maps a
  * config key to the flag's long name: `header` for nuclei and httpx
@@ -36,14 +36,7 @@ export async function withHeadersConfig<T>(
   fn: (headersConfigFile: string | null) => Promise<T>,
 ): Promise<T> {
   if (headers.length === 0) return fn(null)
-  await mkdir(dirname(path), { recursive: true })
-  // `mode` applies only when the file is created: a stale `headers.json`
-  // (a run of this id that died before its `finally`, or a file someone else
-  // planted here) would keep its own permissions under a plain write. Remove
-  // whatever is there, then create exclusively, so the file the tool reads
-  // is always one this process created, always 0600.
-  await rm(path, { force: true })
-  await writeFile(path, headersConfigJson(headers, key), { mode: 0o600, flag: 'wx' })
+  await writeSecretFile(path, headersConfigJson(headers, key))
   try {
     return await fn(path)
   } finally {

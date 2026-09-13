@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Logger } from '../../../lib/logger'
 import { runCommand, SpawnError } from '../../runCommand'
+import { writeSecretFile } from '../../secretFile'
 import { EngineError } from '../../types'
 import { buildHttpxArgs } from './args'
 import { annotateTargets, parseHttpxJsonl } from './normalize'
@@ -80,15 +81,15 @@ export async function probeTargets(i: HttpxProbeInput): Promise<HttpxProbeResult
   // under httpx/ is 0600, pre-created so the tool never creates it under the
   // process umask. argv carries the headers only as a `-config` path (#95),
   // so it is persisted as-is.
-  await writeFile(targetsFile, i.targetUrls.join('\n') + '\n', { mode: 0o600 })
-  for (const p of [stdoutPath, stderrPath]) await writeFile(p, '', { mode: 0o600 })
+  await writeSecretFile(targetsFile, i.targetUrls.join('\n') + '\n')
+  for (const p of [stdoutPath, stderrPath]) await writeSecretFile(p, '')
   const args = buildHttpxArgs({
     targetsFile,
     threads: i.threads,
     rateLimit: i.rateLimit,
     headersConfigFile: i.headersConfigFile,
   })
-  await writeFile(argsFile, JSON.stringify(args), { mode: 0o600 })
+  await writeSecretFile(argsFile, JSON.stringify(args))
 
   const passThrough = (
     status: Exclude<HttpxProbeStatus, 'ok'>,
