@@ -1,0 +1,86 @@
+{
+  "name": "Juice Shop",
+  "frontBaseUrl": "http://127.0.0.1:4001",
+  "apiBaseUrl": null,
+  "nucleiPaths": "/\n/api/Challenges/?name=Score%20Board\n/api/Quantitys/\n/assets/i18n/en.json\n/ftp\n/ftp/acquisitions.md\n/ftp/announcement_encrypted.md\n/ftp/coupons_2013.md.bak\n/ftp/eastere.gg\n/ftp/encrypt.pyc\n/ftp/incident-support.kdbx\n/ftp/legal.md\n/ftp/package-lock.json.bak\n/ftp/package.json.bak\n/ftp/quarantine\n/ftp/quarantine/juicy_malware_linux_amd_64.url\n/ftp/quarantine/juicy_malware_linux_arm_64.url\n/ftp/quarantine/juicy_malware_macos_64.url\n/ftp/quarantine/juicy_malware_windows_64.exe.url\n/ftp/suspicious_errors.yml\n/rest/admin/application-configuration\n/rest/admin/application-version\n/rest/languages\n/rest/products/search?q=\n/rest/basket/NaN\n/rest/user/whoami\n/rest/user/whoami?fields=email\n/rest/continue-code-fixIt/apply/\n/rest/admin\n/rest/web3\n/api/Recycles\n/rest/deluxe-membership\n/rest/user/change-password?current=\n/rest/user/reset-password\n/rest/user/login\n/rest/continue-code-findIt/apply/\n/rest/continue-code/apply/\n/rest/continue-code\n/rest/repeat-notification\n/rest/saveLoginIp\n/rest/user/authentication-details/\n/rest/continue-code-fixIt\n/api/Addresss\n/api/Users\n/api/Challenges\n/api/Feedbacks\n/redirect?to=http\n/redirect?to=https\n/rest/chat\n/snippets/verdict\n/snippets/fixes\n/rest/user\n/rest/products\n/rest/wallet/balance\n/rest/image-captcha/\n/api/SecurityAnswers\n/api/Deliverys\n/rest/memories\n/rest/track-order\n/api/Hints\n/rest/captcha\n/api/Complaints\n/api/Quantitys\n/api/SecurityQuestions\n/api/BasketItems\n/api/Products\n/#/search?q=\n/\n/rest/products/search?q=\n/#/search?q=\n/#/track-result?id=\nPOST /rest/user/login\n/redirect?to=http\n/rest/track-order/1\n/rest/admin/application-configuration\nPOST /api/Complaints/\n/api/Feedbacks/\nPOST /api/Feedbacks/\n/api/SecurityQuestions/\nPOST /api/Users/\n/redirect?to=https://github.com/juice-shop/juice-shop\n/rest/captcha/\n/rest/memories/\n/rest/order-history\n/api/Cards\n/rest/country-mapping\n",
+  "openapiUrl": null,
+  "openapiJson": "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"juice-verify\",\"version\":\"1\"},\"servers\":[{\"url\":\"http://127.0.0.1:4001\"}],\"paths\":{\"/rest/products/search\":{\"get\":{\"parameters\":[{\"name\":\"q\",\"in\":\"query\",\"schema\":{\"type\":\"string\"},\"example\":\"apple\"}],\"responses\":{\"200\":{\"description\":\"ok\"}}}},\"/rest/user/login\":{\"post\":{\"requestBody\":{\"required\":true,\"content\":{\"application/json\":{\"schema\":{\"type\":\"object\",\"properties\":{\"email\":{\"type\":\"string\",\"example\":\"a@b.c\"},\"password\":{\"type\":\"string\",\"example\":\"x\"}}}}}},\"responses\":{\"200\":{\"description\":\"ok\"}}}},\"/rest/track-order/{id}\":{\"get\":{\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"required\":true,\"schema\":{\"type\":\"string\"},\"example\":\"1\"}],\"responses\":{\"200\":{\"description\":\"ok\"}}}},\"/redirect\":{\"get\":{\"parameters\":[{\"name\":\"to\",\"in\":\"query\",\"schema\":{\"type\":\"string\"},\"example\":\"https://github.com/juice-shop/juice-shop\"}],\"responses\":{\"302\":{\"description\":\"redirect\"}}}}}}",
+  "zapFeSeedPath": "/#/",
+  "discoverySeedPaths": "/#/\n/#/search?q=",
+  "crawlScopePaths": "",
+  "excludePaths": "",
+  "nucleiRateLimit": 50,
+  "zapApiMaxMinutes": 45,
+  "zapFeSpiderMaxMinutes": 5,
+  "nonLocalConfirmed": false,
+  "allowMutatingRequests": true,
+  "nucleiEnabledRiskTags": ["fuzz", "intrusive", "dos"],
+  "requestShapes": {
+    "POST|front|/api/Complaints/": {
+      "contentType": "application/json",
+      "bodyShape": {
+        "kind": "json",
+        "root": {
+          "type": "object",
+          "fields": {
+            "UserId": {
+              "type": "number"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "POST|front|/api/Feedbacks/": {
+      "contentType": "application/json",
+      "bodyShape": {
+        "kind": "json",
+        "root": {
+          "type": "object",
+          "fields": {
+            "UserId": {
+              "type": "number"
+            },
+            "captchaId": {
+              "type": "number"
+            },
+            "captcha": {
+              "type": "string"
+            },
+            "comment": {
+              "type": "string"
+            },
+            "rating": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "POST|front|/api/Users/": {
+      "contentType": "application/json",
+      "bodyShape": {
+        "kind": "json",
+        "root": {
+          "type": "object",
+          "fields": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "passwordRepeat": {
+              "type": "string"
+            },
+            "securityAnswer": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

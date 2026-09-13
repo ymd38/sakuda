@@ -14,12 +14,13 @@
     "postinstall": "nuxt prepare",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "typecheck": "nuxt typecheck",
+    "typecheck": "nuxt typecheck && tsc -p tsconfig.scripts.json",
     "test": "vitest run --project server --project nuxt",
     "test:watch": "vitest --project server --project nuxt",
     "test:e2e": "vitest run --project e2e",
     "db:generate": "drizzle-kit generate",
-    "keygen": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64'))\""
+    "keygen": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64'))\"",
+    "seed:juice": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/seed-juice-shop.ts"
   },
   "dependencies": {
     "@fontsource/bebas-neue": "^5.3.0",

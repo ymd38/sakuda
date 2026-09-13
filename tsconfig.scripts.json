@@ -1,0 +1,11 @@
+{
+  // `scripts/` is outside every Nuxt tsconfig, so `pnpm run typecheck` checks it
+  // with this one: the server options (strict, #shared paths, .ts imports) plus
+  // erasableSyntaxOnly, because the scripts run under node --experimental-strip-types.
+  "extends": "./.nuxt/tsconfig.server.json",
+  "compilerOptions": {
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": [".nuxt/types/nitro-nuxt.d.ts", "scripts/**/*.ts"]
+}

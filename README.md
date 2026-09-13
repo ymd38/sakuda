@@ -63,6 +63,7 @@ make up       # start → http://localhost:3001
 make logs     # follow logs · make restart · make ps
 make down && make up   # recreate sakuda (e.g. after make build)
 make down     # stops sakuda only — the data volume and Juice Shop are untouched
+make juice-up && make juice-seed   # optional: OWASP Juice Shop as a ready-to-scan demo site (auth included)
 ```
 
 `make help` lists every target. Without make:
@@ -187,6 +188,7 @@ make test           # unit + component tests
 make e2e            # API e2e tests
 make lint · make typecheck · make check (all three)
 make juice-up       # Juice Shop on JUICESHOP_PORT as a scan target · make juice-down
+make juice-seed     # register it in sakuda as a logged-in demo site (idempotent; re-run after juice-down/up)
 ```
 
 Juice Shop is a separate compose project (`targets/juice-shop/compose.yml`,

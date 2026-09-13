@@ -16,7 +16,7 @@ COMPOSE        ?= docker compose
 JUICE_COMPOSE  ?= $(COMPOSE) $(if $(wildcard .env),--env-file .env) -f targets/juice-shop/compose.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help env keygen build up down restart logs ps open juice-up juice-down \
+.PHONY: help env keygen build up down restart logs ps open juice-up juice-down juice-seed \
         dev test e2e lint typecheck check clean reset-data
 
 help: ## Show this help
@@ -64,9 +64,12 @@ open: ## Open the UI in the browser
 
 juice-up: ## Start OWASP Juice Shop as a dry-run target (http://localhost:JUICESHOP_PORT)
 	$(JUICE_COMPOSE) up -d
-	@echo "juice-shop: http://localhost:$(JUICESHOP_PORT)  → register a site with frontBaseUrl=http://localhost:$(JUICESHOP_PORT)"
+	@echo "juice-shop: http://localhost:$(JUICESHOP_PORT)  → make juice-seed registers it in sakuda as a ready-to-scan site"
 
-juice-down: ## Stop and remove Juice Shop (its accounts reset on the next start)
+juice-seed: ## Register Juice Shop in sakuda as a logged-in demo site (needs make up + make juice-up; re-run refreshes the token)
+	pnpm -s seed:juice
+
+juice-down: ## Stop and remove Juice Shop (its accounts reset on the next start; run make juice-seed again after juice-up)
 	$(JUICE_COMPOSE) down
 
 ## ---- local development (native nuclei, ZAP via scripts/zap-docker.sh) ----

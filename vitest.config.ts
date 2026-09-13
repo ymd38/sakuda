@@ -12,7 +12,7 @@ export default defineConfig({
         test: {
           name: 'server',
           environment: 'node',
-          include: ['server/**/__tests__/**/*.spec.ts'],
+          include: ['server/**/__tests__/**/*.spec.ts', 'scripts/**/__tests__/**/*.spec.ts'],
         },
       },
       await defineVitestProject({
