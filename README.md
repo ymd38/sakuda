@@ -3,16 +3,25 @@
 **sakuda** is short for **「さくっとDAST」** ("DAST, quickly") — the aim is a
 useful security scan with as little setup as possible.
 
-A self-hosted DAST (dynamic application security testing) app. Register a
-**site**, run scans against it with **nuclei**, **ZAP API** (active scan
-against an OpenAPI spec), **ZAP frontend** (spider + baseline against a
+A **self-hosted DAST** (dynamic application security testing) web application
+security scanner that ships as **one Docker image**: **OWASP ZAP**, **nuclei**,
+**katana**, **httpx** and **dalfox** behind a **Nuxt** UI. It covers what the
+individual tools leave to you — **authenticated scanning** of single-page apps
+(header injection plus browser storage seeding), **OpenAPI-driven active
+scans** (documented endpoints and a spec generated from the crawl), **XSS /
+SQL injection / command injection** checks gated behind an explicit opt-in,
+and honest **per-engine reports** with a diff against the previous scan,
+history charts and Markdown export. Point it at a **target you own** — an
+OWASP Juice Shop demo is one command away — and it runs a bounded,
+time-budgeted scan and tells you exactly what it did and did not cover.
+
+Register a **site**, run scans against it with **nuclei**, **ZAP API** (active
+scan against an OpenAPI spec), **ZAP frontend** (spider + baseline against a
 seed page) and/or **Dalfox** (bounded reflected/DOM XSS), and browse the
-results from the UI: per-engine findings, a
-diff against the previous scan, Markdown export, and history charts.
-**Discovery** is separate from scanning: ZAP's spider crawls the site, you
-review the URLs it found and save the ones you want as target paths, and
-nuclei scans that saved list on every run — no need to crawl again until the
-site changes.
+results from the UI. **Discovery** is separate from scanning: ZAP's spider and
+katana crawl the site, you review the URLs they found and save the ones you
+want as target paths, and nuclei scans that saved list on every run — no need
+to crawl again until the site changes.
 
 MVP scope: sites → scans → per-engine reports. See
 [Not in this MVP](#not-in-this-mvp) for what's deliberately out.
