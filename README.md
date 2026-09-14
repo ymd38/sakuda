@@ -1,5 +1,7 @@
 # sakuda
 
+English | [日本語](README.ja.md)
+
 **sakuda** is short for **「さくっとDAST」** ("DAST, quickly") — the aim is a
 useful security scan with as little setup as possible.
 
