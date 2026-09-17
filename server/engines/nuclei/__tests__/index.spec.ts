@@ -28,7 +28,10 @@ const finding = {
   host,
   'matched-at': 'http://' + host + '/a',
 }
-fs.writeFileSync(outFile, JSON.stringify(finding) + '\\n')
+// The priority exposure pass (#3) is a distinct nuclei run over a small tag
+// set; the fake finds nothing there so finding-count assertions stay about the
+// full signature / DAST passes.
+fs.writeFileSync(outFile, outFile.includes('exposure') ? '' : JSON.stringify(finding) + '\\n')
 console.log(JSON.stringify({ requests: '10', errors: '0' }))
 process.exit(0)
 `
@@ -376,7 +379,7 @@ const finding = {
   host: 'localhost:3001',
   'matched-at': 'http://localhost:3001/a',
 }
-fs.writeFileSync(outFile, JSON.stringify(finding) + '\\n')
+fs.writeFileSync(outFile, outFile.includes('exposure') ? '' : JSON.stringify(finding) + '\\n')
 console.log(JSON.stringify({ requests: '10', errors: '0' }))
 process.exit(0)
 `
@@ -472,8 +475,9 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
       baseSite({ allowMutatingRequests: true, nucleiPaths: '/search?q=\n/plain' }),
     )
     // DAST runs first so the short phase never queues behind the long
-    // signature phase inside the shared engine budget (#82)
-    expect(order).toEqual(['dast-findings.jsonl', 'findings.jsonl'])
+    // signature phase inside the shared engine budget (#82); the priority
+    // exposure pass (#3) runs between DAST and the full signature tree.
+    expect(order).toEqual(['dast-findings.jsonl', 'exposure-findings.jsonl', 'findings.jsonl'])
     // signature phase: the http tree only, and never -dast (it would drop every signature template)
     expect(argv).not.toContain('-dast')
     expect(argv.filter((a) => a === '-t')).toHaveLength(1)
@@ -490,6 +494,21 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     expect(out.meta.dastPhase).toBe('empty')
     expect(out.meta.parameterizedUrlCount).toBe(1)
     expect(out.warnings).toEqual([])
+  })
+
+  it('runs a priority exposure pass over the exposure/config/misconfig tags before the full tree (#3)', async () => {
+    const { out, order } = await run(baseSite({ nucleiPaths: '/a' }))
+    const exposureArgv = JSON.parse(
+      readFileSync(join(tmp, 'work', 'argv-exposure-findings.jsonl.json'), 'utf8'),
+    ) as string[]
+    // the exposure pass restricts -tags to the high-signal set and loads the
+    // http (signature) tree, never -dast
+    expect(exposureArgv[exposureArgv.indexOf('-tags') + 1]).toBe('exposure,config,misconfig')
+    expect(exposureArgv).not.toContain('-dast')
+    expect(exposureArgv[exposureArgv.indexOf('-t') + 1]).toBe('/tpl/http')
+    // it runs before the full signature pass
+    expect(order.indexOf('exposure-findings.jsonl')).toBeLessThan(order.indexOf('findings.jsonl'))
+    expect(out.meta.exposurePhase).toBe('empty')
   })
 
   it('passes the env concurrency to every phase and records it in meta (#86)', async () => {
@@ -509,8 +528,12 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
     const { argv, dastArgv } = await run(
       baseSite({ allowMutatingRequests: true, nucleiEnabledRiskTags: ['fuzz'] }),
     )
+    // the risk opt-in drops 'fuzz' from the exclusion and adds its extra tags;
+    // the full signature pass additionally excludes the priority tags run by
+    // the exposure pass (#3), the DAST pass does not.
+    expect(dastArgv![dastArgv!.indexOf('-exclude-tags') + 1]).toBe('dos,intrusive')
+    expect(argv[argv.indexOf('-exclude-tags') + 1]).toBe('dos,intrusive,exposure,config,misconfig')
     for (const a of [argv, dastArgv!]) {
-      expect(a[a.indexOf('-exclude-tags') + 1]).toBe('dos,intrusive')
       expect(a[a.indexOf('-tags') + 1]).toContain('cmdi')
       expect(a[a.indexOf('-tags') + 1]).toContain('rce')
     }
@@ -556,7 +579,11 @@ describe('runNuclei active injection checks (allowMutatingRequests)', () => {
 
   it('ignores selected risk tags while the opt-in is off (exclusion stays full)', async () => {
     const { argv } = await run(baseSite({ nucleiEnabledRiskTags: ['fuzz', 'dos'] }))
-    expect(argv[argv.indexOf('-exclude-tags') + 1]).toBe('dos,fuzz,intrusive')
+    // full signature pass: the risk groups (opt-in off) plus the priority tags
+    // the exposure pass (#3) already covers.
+    expect(argv[argv.indexOf('-exclude-tags') + 1]).toBe(
+      'dos,fuzz,intrusive,exposure,config,misconfig',
+    )
     expect(argv).not.toContain('cmdi')
   })
 
@@ -591,16 +618,19 @@ const FAKE_PARTIAL = `#!/usr/bin/env node
 const fs = require('node:fs')
 const args = process.argv.slice(2)
 const outFile = args[args.indexOf('-o') + 1]
+// The priority exposure pass (#3) completes clean here (empty, 100%) so these
+// #82 partial-coverage assertions stay about the full signature pass.
+const isExposure = outFile.includes('exposure')
 const finding = {
   'template-id': 'fake-high',
   info: { name: 'Fake High', severity: 'high' },
   host: 'localhost:3001',
   'matched-at': 'http://localhost:3001/a',
 }
-fs.writeFileSync(outFile, JSON.stringify(finding) + '\\n')
-if (process.env.FAKE_SKIP_HOST)
+fs.writeFileSync(outFile, isExposure ? '' : JSON.stringify(finding) + '\\n')
+if (process.env.FAKE_SKIP_HOST && !isExposure)
   console.error('[INF] Skipped ' + process.env.FAKE_SKIP_HOST + ' from target list as found unresponsive 33 times')
-console.log(JSON.stringify({ requests: '70268', errors: '1557', total: '868770', percent: process.env.FAKE_PERCENT }))
+console.log(JSON.stringify({ requests: '70268', errors: '1557', total: '868770', percent: isExposure ? '100' : process.env.FAKE_PERCENT }))
 console.error('[INF] Scan completed in 16m. 1 matches found.')
 process.exit(0)
 `

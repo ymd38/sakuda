@@ -3,9 +3,30 @@ import {
   buildNucleiArgs,
   buildNucleiDastArgs,
   buildNucleiOpenapiArgs,
+  fullSignatureExcludeTags,
   NUCLEI_BASE_TAGS,
+  NUCLEI_PRIORITY_SIGNATURE_TAGS,
   nucleiTagsFor,
 } from '../args'
+
+describe('fullSignatureExcludeTags (#3)', () => {
+  it('adds the priority tags to the risk excludes so the two passes never overlap', () => {
+    expect(fullSignatureExcludeTags(['dos', 'fuzz', 'intrusive'])).toEqual([
+      'dos',
+      'fuzz',
+      'intrusive',
+      ...NUCLEI_PRIORITY_SIGNATURE_TAGS,
+    ])
+  })
+  it('de-duplicates when a risk exclude already names a priority tag', () => {
+    expect(fullSignatureExcludeTags(['dos', 'exposure'])).toEqual([
+      'dos',
+      'exposure',
+      'config',
+      'misconfig',
+    ])
+  })
+})
 
 describe('nucleiTagsFor', () => {
   it('returns the base tags when unauthenticated', () => {
