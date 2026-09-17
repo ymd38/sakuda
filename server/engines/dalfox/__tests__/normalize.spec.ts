@@ -47,23 +47,27 @@ describe('dalfoxSeverity', () => {
   it('promotes only verified (V) findings to high', () => {
     expect(dalfoxSeverity('V')).toBe('high')
   })
-  it('never promotes reflection-only (R) or AST (A) above medium', () => {
-    expect(dalfoxSeverity('R')).toBe('medium')
+  it('ranks by verification confidence: AST (A) is medium, reflection-only (R) is low', () => {
     expect(dalfoxSeverity('A')).toBe('medium')
+    expect(dalfoxSeverity('R')).toBe('low')
   })
 })
 
 describe('normalizeDalfoxFindings', () => {
-  it('keeps XSS tiers (V/R) and drops the informational (I) library finding', () => {
+  it('details V as high, counts reflection-only (R) as low without detailing it, drops I', () => {
     const { findings, counts } = normalizeDalfoxFindings(
       parseDalfoxReport(fixture).findings,
       identity,
     )
-    // 3 in the fixture: one V, one R, one I. I is dropped.
-    expect(findings).toHaveLength(2)
-    expect(findings.map((f) => f.severity).sort()).toEqual(['high', 'medium'])
+    // 3 in the fixture: one V, one R, one I. I is not an XSS tier (never
+    // counted); R is a reflection-only signal — counted as low but below the
+    // reported floor, so only the verified V is emitted as a detailed finding.
+    expect(findings).toHaveLength(1)
+    expect(findings.map((f) => f.severity)).toEqual(['high'])
     expect(counts.high).toBe(1)
-    expect(counts.medium).toBe(1)
+    expect(counts.medium).toBe(0)
+    // R is still visible in the counts, not silently suppressed.
+    expect(counts.low).toBe(1)
   })
 
   it('gives every finding a stable, non-payload-derived ruleId keyed on the detection method', () => {
