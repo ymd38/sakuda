@@ -31,6 +31,25 @@ export const NUCLEI_BASE_TAGS = ['xss', 'injection', 'sqli', 'ssrf', 'lfi', 'exp
  * ones back in under `allowMutatingRequests` (see `domain/activeScan`). */
 export const NUCLEI_RISK_EXCLUDE_TAGS = ['dos', 'fuzz', 'intrusive']
 
+/**
+ * High-signal signature categories run as a dedicated *priority* pass before
+ * the full `http` tree (#3). The full tree is ~5022 templates and, against a
+ * rate-limited target, only a fraction of its planned requests run before the
+ * engine deadline — exposed metrics / config / misconfiguration detections
+ * (e.g. `prometheus-metrics`, medium) were routinely in the unrun majority. A
+ * small pass restricted to these tags exercises them first, within budget; the
+ * full pass then excludes them so nothing is scanned twice. Non-mutating
+ * detection templates, so no risk-opt-in gate applies.
+ */
+export const NUCLEI_PRIORITY_SIGNATURE_TAGS = ['exposure', 'config', 'misconfig']
+
+/** The exclude-tags for the full signature pass: the risk groups plus the
+ * priority tags already covered by the priority pass, so the two passes never
+ * run the same template twice. Pure. */
+export function fullSignatureExcludeTags(riskExcludeTags: string[]): string[] {
+  return [...new Set([...riskExcludeTags, ...NUCLEI_PRIORITY_SIGNATURE_TAGS])]
+}
+
 export function nucleiTagsFor(hasHeaders: boolean): string[] {
   return hasHeaders ? [...NUCLEI_BASE_TAGS, 'auth-bypass'] : [...NUCLEI_BASE_TAGS]
 }

@@ -25,7 +25,14 @@ import {
   type EngineRunner,
   type NewFinding,
 } from '../types'
-import { buildNucleiArgs, buildNucleiDastArgs, buildNucleiOpenapiArgs, nucleiTagsFor } from './args'
+import {
+  buildNucleiArgs,
+  buildNucleiDastArgs,
+  buildNucleiOpenapiArgs,
+  fullSignatureExcludeTags,
+  nucleiTagsFor,
+  NUCLEI_PRIORITY_SIGNATURE_TAGS,
+} from './args'
 import { probeTargets, type HttpxProbeMeta } from './httpx'
 import {
   normalizeNucleiLines,
@@ -181,6 +188,7 @@ async function runNucleiPhases(
   let getStats: NucleiStats | null = null
   let dastStats: NucleiStats | null = null
   let signaturePhase: GetPhaseStatus = 'skipped'
+  let exposurePhase: GetPhaseStatus = 'skipped'
   let dastPhase: GetPhaseStatus = 'skipped'
   const unaliasFront = (u: string) =>
     restoreLoopbackHost(u, localAlias, new URL(site.frontBaseUrl).hostname)
@@ -253,7 +261,10 @@ async function runNucleiPhases(
   }
   const runDast = activeScan && liveGetUrls.length > 0
   const runSignature = liveGetUrls.length > 0
-  laterPhases = (runDast ? 1 : 0) + (runSignature ? 1 : 0) + docs.length
+  // The signature phase is two nuclei runs (#3): a priority pass over the
+  // high-signal exposure/config/misconfig tags, then the full `http` tree with
+  // those tags excluded. Both are reserved a floor.
+  laterPhases = (runDast ? 1 : 0) + (runSignature ? 2 : 0) + docs.length
 
   // --- phase 1a: GET URL list, DAST templates (active checks only) --------
   // Runs FIRST: the DAST tree is ~20 templates and finishes in well under a
@@ -299,15 +310,56 @@ async function runNucleiPhases(
     dastStats = phase.stats
   }
 
+  // --- phase 1b-priority: high-signal exposure/config/misconfig templates ---
+  // The full `http` tree (~5022 templates) only reaches a fraction of its
+  // planned requests before the deadline against a rate-limited target, so
+  // exposed metrics / config / misconfiguration detections were routinely in
+  // the unrun majority (#3). Run them first as a small, budgeted pass; the
+  // full pass below excludes these tags so nothing is scanned twice.
+  if (runSignature && !anAborted) {
+    laterPhases -= 1
+    if (remaining() > 0) {
+      const outputFile = join(workDir, 'exposure-findings.jsonl')
+      const stdoutPath = join(workDir, 'exposure-stdout.log')
+      const stderrPath = join(workDir, 'exposure-stderr.log')
+      const args = buildNucleiArgs({
+        targetsFile,
+        templatesDir: env.nuclei.templatesDir,
+        outputFile,
+        rateLimit: site.nucleiRateLimit,
+        concurrency: env.nuclei.concurrency,
+        tags: NUCLEI_PRIORITY_SIGNATURE_TAGS,
+        headersConfigFile,
+        excludeTags: riskExcludeTags(riskTags),
+      })
+      const phase = await runNucleiPhase({
+        label: `nuclei-exposure:${scanId}`,
+        cmd: env.nuclei.bin,
+        args,
+        workDir,
+        outputFile,
+        stdoutPath,
+        stderrPath,
+        timeoutMs: budgetFor(laterPhases),
+        signal,
+        logger,
+        unalias: unaliasFront,
+        readStats: true,
+      })
+      absorb(phase, 'signature (exposure)', stderrPath)
+      exposurePhase = phase.status
+    }
+  }
+
   // --- phase 1b: the same GET list, signature templates (the `http` tree) --
   // Same argv in both modes except the tag lists; never `-dast`, which
   // would make nuclei run DAST templates only and drop every signature
-  // template (#65).
+  // template (#65). Excludes the priority tags already run above.
   if (runSignature && !anAborted) {
     laterPhases -= 1
     if (remaining() <= 0) {
       warnings.push(
-        'nuclei was stopped by the engine timeout before the signature phase started; results are partial',
+        'nuclei was stopped by the engine timeout before the full signature phase started; results are partial',
       )
       timedOut = true
     } else {
@@ -322,7 +374,7 @@ async function runNucleiPhases(
         concurrency: env.nuclei.concurrency,
         tags,
         headersConfigFile,
-        excludeTags: riskExcludeTags(riskTags),
+        excludeTags: fullSignatureExcludeTags(riskExcludeTags(riskTags)),
       })
       const phase = await runNucleiPhase({
         label: `nuclei:${scanId}`,
@@ -462,6 +514,7 @@ async function runNucleiPhases(
       parameterizedUrlCount,
       timeBudget,
       signaturePhase,
+      exposurePhase,
       dastPhase,
       stats: getStats,
       ...(dastStats ? { dastStats } : {}),
