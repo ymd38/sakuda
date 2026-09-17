@@ -75,18 +75,23 @@ export function isApiCall(method: string, url: string): boolean {
 }
 
 /**
- * True when the Ajax spider ran (there are Ajax-sourced entries) but the app
- * made no client-side API call — the SPA likely never booted or is still
- * anonymous, which otherwise looks like a clean, empty-of-findings crawl.
- * Returns false when there are no Ajax entries at all: that is a different
- * situation (the browser never crawled) already covered by other warnings, and
- * we do not want to duplicate it.
+ * True when the browser spider ran (there are browser-driven entries — from
+ * ZAP's Ajax spider *or* its client spider) but the app made no client-side
+ * API call — the SPA likely never booted or is still anonymous, which
+ * otherwise looks like a clean, empty-of-findings crawl. Both spider kinds
+ * drive a real browser and either can be the one that produces a SPA's XHR
+ * calls, so both must count; looking at Ajax alone raised a false alarm when
+ * the client spider was the one that reached the API.
+ *
+ * Returns false when there are no browser-driven entries at all: that is a
+ * different situation (the browser never crawled) already covered by other
+ * warnings, and we do not want to duplicate it.
  */
 export function spaLikelyDidNotStart(
-  ajaxEntries: ReadonlyArray<{ method: string; url: string }>,
+  browserEntries: ReadonlyArray<{ method: string; url: string }>,
 ): boolean {
-  if (ajaxEntries.length === 0) return false
-  return !ajaxEntries.some((e) => isApiCall(e.method, e.url))
+  if (browserEntries.length === 0) return false
+  return !browserEntries.some((e) => isApiCall(e.method, e.url))
 }
 
 function isNoise(pathname: string): boolean {
