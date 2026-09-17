@@ -75,6 +75,26 @@ export function parseNucleiStats(logText: string): NucleiStats | null {
   return null
 }
 
+/**
+ * A nuclei command-injection match made only by response timing (`matcher-name`
+ * "time-based") with no extracted command output is unverified. A rate-limited
+ * scan against a slow or variable-latency target produces timing false
+ * positives: a `$(id)` / `&&whoami` that the app never runs still "delayed"
+ * enough to trip the DSL duration check, so the generic cmdi templates flag
+ * echo/error endpoints that have no command execution at all (observed against
+ * Juice Shop, which has no OS-command-injection challenge). Such a match is not
+ * a high confirmed finding.
+ *
+ * A cmdi match that extracted command output (`uid=…`, `root:x:…` in
+ * `extracted-results`) is corroborated and is left at its template severity —
+ * only the output-less, timing-only signal is demoted.
+ */
+export function isUnverifiedTimeBasedCmdi(l: NucleiLine): boolean {
+  const tags = l.info.tags ?? []
+  const noOutput = l['extracted-results'] === undefined || l['extracted-results'].length === 0
+  return tags.includes('cmdi') && l['matcher-name'] === 'time-based' && noOutput
+}
+
 export function normalizeNucleiLines(
   lines: NucleiLine[],
   unalias: (u: string) => string,
@@ -87,7 +107,11 @@ export function normalizeNucleiLines(
     // .includes() can check an arbitrary lowercased severity string against it.
     const isKnownLevel = (SEVERITY_LEVELS as readonly string[]).includes(sev)
     // as: narrowed by the includes() check above — sev is one of SEVERITY_LEVELS when true.
-    const level: SeverityLevel = isKnownLevel ? (sev as SeverityLevel) : 'info'
+    const templateLevel: SeverityLevel = isKnownLevel ? (sev as SeverityLevel) : 'info'
+    // An unverified (timing-only) command-injection match is demoted to `low`:
+    // below the reported floor so it never surfaces as a confirmed finding, but
+    // still counted (never silently dropped) so the timing signal stays visible.
+    const level: SeverityLevel = isUnverifiedTimeBasedCmdi(l) ? 'low' : templateLevel
     counts[level]++
     if (!isReportedSeverity(level)) continue
     const url = unalias(l['matched-at'] ?? l.host ?? '')
