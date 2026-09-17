@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isUnverifiedTimeBasedCmdi,
   normalizeNucleiLines,
   parseNucleiJsonl,
   parseNucleiStats,
@@ -106,6 +107,84 @@ describe('normalizeNucleiLines', () => {
     const { findings } = normalizeNucleiLines(lines, (u) => u)
     expect(findings[0]!.raw).not.toHaveProperty('request')
     expect(findings[0]!.raw).not.toHaveProperty('response')
+  })
+
+  const cmdiTimeBased = {
+    'template-id': 'windows-command-injection',
+    info: {
+      name: 'Windows Command Injection - Generic Detection',
+      severity: 'high',
+      tags: ['cmdi', 'dast', 'rce', 'fuzz'],
+    },
+    'matched-at': 'http://host.docker.internal:4001/api/Products/3?d&&whoami',
+    'matcher-name': 'time-based',
+  }
+
+  it('demotes a timing-only command-injection match to low (counted, not a confirmed finding)', () => {
+    const { lines } = parseNucleiJsonl(JSON.stringify(cmdiTimeBased))
+    const { findings, counts } = normalizeNucleiLines(lines, (u) => u)
+    // high template severity, but timing-only with no extracted output → low.
+    expect(counts.high).toBe(0)
+    expect(counts.low).toBe(1)
+    // below the reported floor, so not emitted as a detailed finding — but the
+    // low count keeps the timing signal visible rather than silently dropping it.
+    expect(findings).toHaveLength(0)
+  })
+
+  it('keeps a command-injection match that extracted command output at its severity', () => {
+    const line = JSON.stringify({
+      ...cmdiTimeBased,
+      'matcher-name': 'unix',
+      'extracted-results': ['uid=0(root) gid=0(root)'],
+    })
+    const { lines } = parseNucleiJsonl(line)
+    const { findings, counts } = normalizeNucleiLines(lines, (u) => u)
+    expect(counts.high).toBe(1)
+    expect(findings).toHaveLength(1)
+    expect(findings[0]!.severity).toBe('high')
+  })
+
+  it('does not demote a time-based match of a non-cmdi template (e.g. sqli)', () => {
+    const line = JSON.stringify({
+      'template-id': 'time-based-sqli',
+      info: {
+        name: 'Time-Based Blind SQL Injection',
+        severity: 'critical',
+        tags: ['sqli', 'dast'],
+      },
+      'matched-at': 'http://h/rest/products/search?q=1',
+      'matcher-name': 'time-based',
+    })
+    const { lines } = parseNucleiJsonl(line)
+    const { counts } = normalizeNucleiLines(lines, (u) => u)
+    expect(counts.critical).toBe(1)
+    expect(counts.low).toBe(0)
+  })
+})
+
+describe('isUnverifiedTimeBasedCmdi', () => {
+  const base = {
+    'template-id': 'unix-command-injection',
+    info: { name: 'n', severity: 'high', tags: ['cmdi', 'dast'] },
+    'matcher-name': 'time-based',
+  }
+  it('is true for a cmdi template matched time-based with no extracted output', () => {
+    expect(isUnverifiedTimeBasedCmdi(parseNucleiJsonl(JSON.stringify(base)).lines[0]!)).toBe(true)
+  })
+  it('is false when command output was extracted (corroborated)', () => {
+    const l = parseNucleiJsonl(JSON.stringify({ ...base, 'extracted-results': ['uid=0'] }))
+      .lines[0]!
+    expect(isUnverifiedTimeBasedCmdi(l)).toBe(false)
+  })
+  it('is false for a non-time-based matcher', () => {
+    const l = parseNucleiJsonl(JSON.stringify({ ...base, 'matcher-name': 'word' })).lines[0]!
+    expect(isUnverifiedTimeBasedCmdi(l)).toBe(false)
+  })
+  it('is false for a non-cmdi template', () => {
+    const l = parseNucleiJsonl(
+      JSON.stringify({ ...base, info: { name: 'n', severity: 'high', tags: ['sqli'] } }),
+    ).lines[0]!
+    expect(isUnverifiedTimeBasedCmdi(l)).toBe(false)
   })
 })
 
