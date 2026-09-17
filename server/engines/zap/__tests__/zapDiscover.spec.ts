@@ -112,7 +112,7 @@ describe('runZapDiscover', () => {
       timedOut: false,
     })
     expect(out.warnings).toEqual([
-      '1 request(s) got 401/403 — headers may be missing or expired',
+      '1 request(s) returned 401 Unauthorized — the auth headers may be missing or expired',
       '1 unparsable line(s) in the site-tree dump were ignored',
     ])
 
@@ -394,6 +394,91 @@ describe('runZapDiscover', () => {
 
     expect(out.warnings.some((w) => w.includes('made no client-side API calls'))).toBe(true)
     expect(out.meta.ajaxApiCallCount).toBe(0)
+  })
+
+  it('does not warn SPA-not-started when the client spider (type 24) made an API call', async () => {
+    // type 10 = ajax (only an HTML page here), type 24 = client spider (an
+    // API call). The client spider reaching the API means the SPA started, so
+    // the warning must not fire even though no *ajax* entry is an API call.
+    const dump = join(tmp, 'client-api.jsonl')
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(
+      dump,
+      [
+        JSON.stringify({ method: 'GET', url: 'http://localhost:3000/', type: 2, status: 200 }),
+        JSON.stringify({
+          method: 'GET',
+          url: 'http://localhost:3000/about',
+          type: 10,
+          status: 200,
+        }),
+        JSON.stringify({
+          method: 'GET',
+          url: 'http://localhost:3000/rest/products/search?q=',
+          type: 24,
+          status: 200,
+        }),
+      ].join('\n'),
+    )
+    const fakeBin = writeFakeZap(tmp, dump, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+
+    const out = await runZapDiscover({
+      discoveryId: 'disc-client',
+      site: baseSite(),
+      workDir: join(tmp, 'work'),
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    expect(out.warnings.some((w) => w.includes('made no client-side API calls'))).toBe(false)
+  })
+
+  it('warns on a 401 but not on a 403 alone (403 is often legitimate access control)', async () => {
+    const dump = join(tmp, 'forbidden.jsonl')
+    const { writeFileSync } = await import('node:fs')
+    // Only a 403 (a protected backup file) and a successful API call — no 401.
+    writeFileSync(
+      dump,
+      [
+        JSON.stringify({
+          method: 'GET',
+          url: 'http://localhost:3000/rest/products/search?q=',
+          type: 10,
+          status: 200,
+        }),
+        JSON.stringify({
+          method: 'GET',
+          url: 'http://localhost:3000/ftp/coupons.md.bak',
+          type: 2,
+          status: 403,
+        }),
+      ].join('\n'),
+    )
+    const fakeBin = writeFakeZap(tmp, dump, 'fake-zap.js', 'site-tree.jsonl')
+    const env: Env = parseEnv({
+      SAKUDA_ENCRYPTION_KEY: key,
+      SAKUDA_ZAP_CMD: fakeBin,
+      SAKUDA_DATA_DIR: tmp,
+    })
+
+    const out = await runZapDiscover({
+      discoveryId: 'disc-403',
+      site: baseSite(),
+      workDir: join(tmp, 'work'),
+      env,
+      logger,
+      signal: new AbortController().signal,
+    })
+
+    expect(out.warnings.some((w) => w.includes('Unauthorized'))).toBe(false)
+    // the 403 is still recorded in meta, just not warned about as an auth failure
+    expect(out.meta.authFailureCount).toBe(1)
   })
 
   it('keeps a GET and a POST of the same URL as two targets (method-aware dedupe)', async () => {

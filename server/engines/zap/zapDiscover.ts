@@ -148,20 +148,32 @@ export const runZapDiscover: DiscoverRunner = async ({
     ...(entry.bodyShape ? { bodyShape: entry.bodyShape } : {}),
   }))
   const bodyShapeCount = urls.filter((u) => u.bodyShape).length
-  const authFailureCount = dump.entries.filter((e) => e.status === 401 || e.status === 403).length
-  // Ajax-spider entries only — the ones a running SPA would have produced.
-  const ajaxEntries = dump.entries.filter((e) => historyTypeToSource(e.type) === 'ajax')
+  const unauthorizedCount = dump.entries.filter((e) => e.status === 401).length
+  const forbiddenCount = dump.entries.filter((e) => e.status === 403).length
+  // meta keeps both statuses; the warning below is 401-only on purpose (a 403
+  // is often legitimate access control — e.g. a protected `/ftp/*.bak` — not a
+  // sign the auth headers expired).
+  const authFailureCount = unauthorizedCount + forbiddenCount
+  // Browser-spider entries (Ajax + client) — either kind can be the one a
+  // running SPA produces its XHR calls through, so both count (see
+  // spaLikelyDidNotStart).
+  const browserEntries = dump.entries.filter((e) => {
+    const source = historyTypeToSource(e.type)
+    return source === 'ajax' || source === 'client'
+  })
   const warnings: string[] = []
   if (dump.entries.length === 0)
     warnings.push(
       'the crawl requested no URLs — verify the target is reachable from ZAP and the seed path is right',
     )
-  if (spaLikelyDidNotStart(ajaxEntries))
+  if (spaLikelyDidNotStart(browserEntries))
     warnings.push(
-      'the Ajax spider ran but the app made no client-side API calls — the SPA likely did not start or is still anonymous. Check: the secure-context alias, the browser-storage login values, and that the app JS (e.g. /_nuxt/*) is not in excludePaths',
+      'the browser spider ran but the app made no client-side API calls — the SPA likely did not start or is still anonymous. Check: the secure-context alias, the browser-storage login values, and that the app JS (e.g. /_nuxt/*) is not in excludePaths',
     )
-  if (authFailureCount > 0)
-    warnings.push(`${authFailureCount} request(s) got 401/403 — headers may be missing or expired`)
+  if (unauthorizedCount > 0)
+    warnings.push(
+      `${unauthorizedCount} request(s) returned 401 Unauthorized — the auth headers may be missing or expired`,
+    )
   if (run.result.timedOut)
     warnings.push('ZAP was stopped by the engine timeout; the URL list may be partial')
   if (dump.invalidLines > 0)
@@ -188,7 +200,9 @@ export const runZapDiscover: DiscoverRunner = async ({
       bodyShapeCount,
       dropped,
       authFailureCount,
-      ajaxApiCallCount: ajaxEntries.filter((e) => isApiCall(e.method, e.url)).length,
+      ajaxApiCallCount: dump.entries.filter(
+        (e) => historyTypeToSource(e.type) === 'ajax' && isApiCall(e.method, e.url),
+      ).length,
       excludeRegexes,
       durationSec: Math.round(run.result.durationMs / 1000),
       timedOut: run.result.timedOut,
