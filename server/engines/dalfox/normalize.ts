@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { emptyCounts, isReportedSeverity } from '#shared/utils/severity'
-import type { SeverityCounts, Severity, SeverityLevel } from '#shared/types/api'
+import type { SeverityCounts, SeverityLevel } from '#shared/types/api'
 import type { NewFinding } from '../types'
 
 /**
@@ -111,13 +111,20 @@ export function parseDalfoxReport(json: string): ParsedDalfoxReport {
 const XSS_TIERS = new Set(['V', 'A', 'R'])
 
 /**
- * Maps a dalfox tier to a sakuda severity. Deliberately conservative:
- * only a *verified* finding (`V`) reaches `high`; an AST/DOM flow (`A`) and a
- * reflection-only signal (`R`) are `medium`. A reflection is never promoted to
- * critical/high — dalfox drives no browser, so `R` is a signal, not a claim.
+ * Maps a dalfox tier to a sakuda severity by verification confidence:
+ * `V` (verified in a headless browser) → `high`; `A` (an AST source-to-sink
+ * flow — statically identified, browser-unverified) → `medium`; `R`
+ * (reflection only — the payload came back in the response but nothing
+ * confirmed it executes) → `low`. A reflection-only signal is the weakest
+ * tier: dalfox greps the response and cannot see the output context, so a
+ * payload echoed into a non-executing place (an error page `<title>`, a JSON
+ * body) reads the same as a real one. Keeping `R` below the reported floor
+ * (see REPORTED_SEVERITIES) stops those unverified signals from surfacing as
+ * medium XSS findings, while `normalizeDalfoxFindings` still counts them so
+ * they are visible, not suppressed.
  */
-export function dalfoxSeverity(tier: string): Severity {
-  return tier === 'V' ? 'high' : 'medium'
+export function dalfoxSeverity(tier: string): SeverityLevel {
+  return tier === 'V' ? 'high' : tier === 'A' ? 'medium' : 'low'
 }
 
 /** The detection method, falling back from the tier when dalfox omits it, so
@@ -148,6 +155,11 @@ export function normalizeDalfoxFindings(
   for (const f of findings) {
     if (!XSS_TIERS.has(f.type)) continue
     const level: SeverityLevel = dalfoxSeverity(f.type)
+    // Count every XSS-tier signal — reflection-only (`R` → low) included — so
+    // it stays visible in the severity counts. Below the reported floor it is
+    // not emitted as a detailed finding (same as any low/info), but it is
+    // never silently dropped.
+    counts[level]++
     if (!isReportedSeverity(level)) continue
     const method = methodOf(f)
     const param = f.param === '' || f.param === '-' ? null : f.param
@@ -173,7 +185,6 @@ export function normalizeDalfoxFindings(
       reference: `https://cwe.mitre.org/data/definitions/${cweId}.html`,
       raw: { ...f, data: unalias(f.data) },
     })
-    counts[level]++
   }
   return { findings: out, counts }
 }
